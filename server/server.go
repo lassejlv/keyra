@@ -269,6 +269,18 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleLLen(args)
 	case "LRANGE":
 		return s.handleLRange(args)
+	case "LINDEX":
+		return s.handleLIndex(args)
+	case "LSET":
+		return s.handleLSet(args)
+	case "LTRIM":
+		return s.handleLTrim(args)
+	case "LINSERT":
+		return s.handleLInsert(args)
+	case "BLPOP":
+		return s.handleBLPop(args)
+	case "BRPOP":
+		return s.handleBRPop(args)
 	// Hash commands
 	case "HSET":
 		return s.handleHSet(args)
@@ -286,6 +298,16 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleHVals(args)
 	case "HGETALL":
 		return s.handleHGetAll(args)
+	case "HINCRBY":
+		return s.handleHIncrBy(args)
+	case "HINCRBYFLOAT":
+		return s.handleHIncrByFloat(args)
+	case "HMSET":
+		return s.handleHMSet(args)
+	case "HMGET":
+		return s.handleHMGet(args)
+	case "HSETNX":
+		return s.handleHSetNX(args)
 	// Set commands
 	case "SADD":
 		return s.handleSAdd(args)
@@ -301,6 +323,47 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleSPop(args)
 	case "SRANDMEMBER":
 		return s.handleSRandMember(args)
+	case "SINTER":
+		return s.handleSInter(args)
+	case "SUNION":
+		return s.handleSUnion(args)
+	case "SDIFF":
+		return s.handleSDiff(args)
+	case "SINTERSTORE":
+		return s.handleSInterStore(args)
+	case "SUNIONSTORE":
+		return s.handleSUnionStore(args)
+	case "SDIFFSTORE":
+		return s.handleSDiffStore(args)
+	case "SMOVE":
+		return s.handleSMove(args)
+	case "RANDOMKEY":
+		return s.handleRandomKey(args)
+	// Sorted Set commands
+	case "ZADD":
+		return s.handleZAdd(args)
+	case "ZREM":
+		return s.handleZRem(args)
+	case "ZRANGE":
+		return s.handleZRange(args)
+	case "ZREVRANGE":
+		return s.handleZRevRange(args)
+	case "ZRANGEBYSCORE":
+		return s.handleZRangeByScore(args)
+	case "ZREVRANGEBYSCORE":
+		return s.handleZRevRangeByScore(args)
+	case "ZRANK":
+		return s.handleZRank(args)
+	case "ZREVRANK":
+		return s.handleZRevRank(args)
+	case "ZSCORE":
+		return s.handleZScore(args)
+	case "ZCARD":
+		return s.handleZCard(args)
+	case "ZCOUNT":
+		return s.handleZCount(args)
+	case "ZINCRBY":
+		return s.handleZIncrBy(args)
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}
@@ -634,10 +697,13 @@ func (s *Server) handleInfo(args []string) string {
 	
 	if section == "default" || section == "keyspace" {
 		info.WriteString("# Keyspace\r\n")
-		dbSize := s.store.DBSize()
-		if dbSize > 0 {
-			info.WriteString("db0:keys=" + strconv.Itoa(dbSize) + ",expires=0,avg_ttl=0\r\n")
+		
+		// Show info for all databases with keys
+		dbInfo := s.store.GetDBInfo()
+		for dbIndex, keyCount := range dbInfo {
+			info.WriteString(fmt.Sprintf("db%d:keys=%d,expires=0,avg_ttl=0\r\n", dbIndex, keyCount))
 		}
+		
 		info.WriteString("\r\n")
 	}
 	
@@ -892,6 +958,124 @@ func (s *Server) handleLRange(args []string) string {
 	return result
 }
 
+func (s *Server) handleLIndex(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'lindex' command")
+	}
+
+	key := args[0]
+	index, err := strconv.Atoi(args[1])
+	if err != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	value, exists := s.store.LIndex(key, index)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(value)
+}
+
+func (s *Server) handleLSet(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'lset' command")
+	}
+
+	key := args[0]
+	index, err := strconv.Atoi(args[1])
+	if err != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+	element := args[2]
+
+	if s.store.LSet(key, index, element) {
+		return protocol.EncodeSimpleString("OK")
+	}
+	return protocol.EncodeError("ERR no such key")
+}
+
+func (s *Server) handleLTrim(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'ltrim' command")
+	}
+
+	key := args[0]
+	start, err1 := strconv.Atoi(args[1])
+	stop, err2 := strconv.Atoi(args[2])
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	s.store.LTrim(key, start, stop)
+	return protocol.EncodeSimpleString("OK")
+}
+
+func (s *Server) handleLInsert(args []string) string {
+	if len(args) < 4 {
+		return protocol.EncodeError("wrong number of arguments for 'linsert' command")
+	}
+
+	key := args[0]
+	where := args[1]
+	pivot := args[2]
+	element := args[3]
+
+	result := s.store.LInsert(key, where, pivot, element)
+	return protocol.EncodeInteger(result)
+}
+
+func (s *Server) handleBLPop(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'blpop' command")
+	}
+
+	// Extract timeout (last argument)
+	timeout, err := strconv.Atoi(args[len(args)-1])
+	if err != nil {
+		return protocol.EncodeError("timeout is not an integer or out of range")
+	}
+
+	// Extract keys (all but last argument)
+	keys := args[:len(args)-1]
+
+	resultKey, resultValue, exists := s.store.BLPop(keys, timeout)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+
+	// Return array with key and value
+	result := "*2\r\n"
+	result += protocol.EncodeBulkString(resultKey)
+	result += protocol.EncodeBulkString(resultValue)
+	return result
+}
+
+func (s *Server) handleBRPop(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'brpop' command")
+	}
+
+	// Extract timeout (last argument)
+	timeout, err := strconv.Atoi(args[len(args)-1])
+	if err != nil {
+		return protocol.EncodeError("timeout is not an integer or out of range")
+	}
+
+	// Extract keys (all but last argument)
+	keys := args[:len(args)-1]
+
+	resultKey, resultValue, exists := s.store.BRPop(keys, timeout)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+
+	// Return array with key and value
+	result := "*2\r\n"
+	result += protocol.EncodeBulkString(resultKey)
+	result += protocol.EncodeBulkString(resultValue)
+	return result
+}
+
 // Hash commands
 func (s *Server) handleHSet(args []string) string {
 	if len(args) < 3 {
@@ -999,6 +1183,93 @@ func (s *Server) handleHGetAll(args []string) string {
 	return result
 }
 
+func (s *Server) handleHIncrBy(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'hincrby' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	increment, err := strconv.ParseInt(args[2], 10, 64)
+	if err != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	result, success := s.store.HIncrBy(key, field, increment)
+	if !success {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeInteger(int(result))
+}
+
+func (s *Server) handleHIncrByFloat(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'hincrbyfloat' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	increment, err := strconv.ParseFloat(args[2], 64)
+	if err != nil {
+		return protocol.EncodeError("value is not a valid float")
+	}
+
+	result, success := s.store.HIncrByFloat(key, field, increment)
+	if !success {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeBulkString(strconv.FormatFloat(result, 'g', -1, 64))
+}
+
+func (s *Server) handleHMSet(args []string) string {
+	if len(args) < 3 || len(args)%2 == 0 {
+		return protocol.EncodeError("wrong number of arguments for 'hmset' command")
+	}
+
+	key := args[0]
+	fieldValuePairs := args[1:]
+
+	if s.store.HMSet(key, fieldValuePairs) {
+		return protocol.EncodeSimpleString("OK")
+	}
+	return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+}
+
+func (s *Server) handleHMGet(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'hmget' command")
+	}
+
+	key := args[0]
+	fields := args[1:]
+	values := s.store.HMGet(key, fields)
+
+	result := fmt.Sprintf("*%d\r\n", len(values))
+	for _, value := range values {
+		if value == "" {
+			result += "$-1\r\n" // Null bulk string
+		} else {
+			result += protocol.EncodeBulkString(value)
+		}
+	}
+	return result
+}
+
+func (s *Server) handleHSetNX(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'hsetnx' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	value := args[2]
+
+	if s.store.HSetNX(key, field, value) {
+		return protocol.EncodeInteger(1) // Field was set
+	}
+	return protocol.EncodeInteger(0) // Field already existed
+}
+
 // Set commands
 func (s *Server) handleSAdd(args []string) string {
 	if len(args) < 2 {
@@ -1083,4 +1354,357 @@ func (s *Server) handleSRandMember(args []string) string {
 		return protocol.EncodeBulkString("")
 	}
 	return protocol.EncodeBulkString(member)
+}
+
+func (s *Server) handleSInter(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'sinter' command")
+	}
+
+	members := s.store.SInter(args)
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
+	}
+	return result
+}
+
+func (s *Server) handleSUnion(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'sunion' command")
+	}
+
+	members := s.store.SUnion(args)
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
+	}
+	return result
+}
+
+func (s *Server) handleSDiff(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'sdiff' command")
+	}
+
+	members := s.store.SDiff(args)
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
+	}
+	return result
+}
+
+func (s *Server) handleSInterStore(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'sinterstore' command")
+	}
+
+	destination := args[0]
+	keys := args[1:]
+	count := s.store.SInterStore(destination, keys)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSUnionStore(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'sunionstore' command")
+	}
+
+	destination := args[0]
+	keys := args[1:]
+	count := s.store.SUnionStore(destination, keys)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSDiffStore(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'sdiffstore' command")
+	}
+
+	destination := args[0]
+	keys := args[1:]
+	count := s.store.SDiffStore(destination, keys)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSMove(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'smove' command")
+	}
+
+	source := args[0]
+	destination := args[1]
+	member := args[2]
+
+	if s.store.SMove(source, destination, member) {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handleRandomKey(args []string) string {
+	if len(args) > 0 {
+		return protocol.EncodeError("wrong number of arguments for 'randomkey' command")
+	}
+
+	key := s.store.RandomKey()
+	if key == "" {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(key)
+}
+
+// Sorted Set commands
+func (s *Server) handleZAdd(args []string) string {
+	if len(args) < 3 || len(args)%2 == 0 {
+		return protocol.EncodeError("wrong number of arguments for 'zadd' command")
+	}
+
+	key := args[0]
+	scoreMembers := args[1:]
+	
+	added := s.store.ZAdd(key, scoreMembers)
+	if added == -1 {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeInteger(added)
+}
+
+func (s *Server) handleZRem(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'zrem' command")
+	}
+
+	key := args[0]
+	members := args[1:]
+	count := s.store.ZRem(key, members)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleZRange(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zrange' command")
+	}
+
+	key := args[0]
+	start, err1 := strconv.Atoi(args[1])
+	stop, err2 := strconv.Atoi(args[2])
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	withScores := false
+	if len(args) > 3 && strings.ToUpper(args[3]) == "WITHSCORES" {
+		withScores = true
+	}
+
+	members := s.store.ZRange(key, start, stop, false)
+	
+	if withScores {
+		result := fmt.Sprintf("*%d\r\n", len(members)*2)
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
+		}
+		return result
+	} else {
+		result := fmt.Sprintf("*%d\r\n", len(members))
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+		}
+		return result
+	}
+}
+
+func (s *Server) handleZRevRange(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zrevrange' command")
+	}
+
+	key := args[0]
+	start, err1 := strconv.Atoi(args[1])
+	stop, err2 := strconv.Atoi(args[2])
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	withScores := false
+	if len(args) > 3 && strings.ToUpper(args[3]) == "WITHSCORES" {
+		withScores = true
+	}
+
+	members := s.store.ZRange(key, start, stop, true)
+	
+	if withScores {
+		result := fmt.Sprintf("*%d\r\n", len(members)*2)
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
+		}
+		return result
+	} else {
+		result := fmt.Sprintf("*%d\r\n", len(members))
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+		}
+		return result
+	}
+}
+
+func (s *Server) handleZRangeByScore(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zrangebyscore' command")
+	}
+
+	key := args[0]
+	min, err1 := strconv.ParseFloat(args[1], 64)
+	max, err2 := strconv.ParseFloat(args[2], 64)
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("min or max is not a float")
+	}
+
+	withScores := false
+	if len(args) > 3 && strings.ToUpper(args[3]) == "WITHSCORES" {
+		withScores = true
+	}
+
+	members := s.store.ZRangeByScore(key, min, max, false)
+	
+	if withScores {
+		result := fmt.Sprintf("*%d\r\n", len(members)*2)
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
+		}
+		return result
+	} else {
+		result := fmt.Sprintf("*%d\r\n", len(members))
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+		}
+		return result
+	}
+}
+
+func (s *Server) handleZRevRangeByScore(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zrevrangebyscore' command")
+	}
+
+	key := args[0]
+	max, err1 := strconv.ParseFloat(args[1], 64)
+	min, err2 := strconv.ParseFloat(args[2], 64)
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("min or max is not a float")
+	}
+
+	withScores := false
+	if len(args) > 3 && strings.ToUpper(args[3]) == "WITHSCORES" {
+		withScores = true
+	}
+
+	members := s.store.ZRangeByScore(key, min, max, true)
+	
+	if withScores {
+		result := fmt.Sprintf("*%d\r\n", len(members)*2)
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
+		}
+		return result
+	} else {
+		result := fmt.Sprintf("*%d\r\n", len(members))
+		for _, member := range members {
+			result += protocol.EncodeBulkString(member.Member)
+		}
+		return result
+	}
+}
+
+func (s *Server) handleZRank(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'zrank' command")
+	}
+
+	key := args[0]
+	member := args[1]
+	rank := s.store.ZRank(key, member, false)
+	if rank == -1 {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeInteger(rank)
+}
+
+func (s *Server) handleZRevRank(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'zrevrank' command")
+	}
+
+	key := args[0]
+	member := args[1]
+	rank := s.store.ZRank(key, member, true)
+	if rank == -1 {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeInteger(rank)
+}
+
+func (s *Server) handleZScore(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'zscore' command")
+	}
+
+	key := args[0]
+	member := args[1]
+	score, exists := s.store.ZScore(key, member)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(strconv.FormatFloat(score, 'g', -1, 64))
+}
+
+func (s *Server) handleZCard(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'zcard' command")
+	}
+
+	key := args[0]
+	count := s.store.ZCard(key)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleZCount(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zcount' command")
+	}
+
+	key := args[0]
+	min, err1 := strconv.ParseFloat(args[1], 64)
+	max, err2 := strconv.ParseFloat(args[2], 64)
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("min or max is not a float")
+	}
+
+	count := s.store.ZCount(key, min, max)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleZIncrBy(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'zincrby' command")
+	}
+
+	key := args[0]
+	increment, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		return protocol.EncodeError("value is not a valid float")
+	}
+	member := args[2]
+
+	newScore, success := s.store.ZIncrBy(key, member, increment)
+	if !success {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeBulkString(strconv.FormatFloat(newScore, 'g', -1, 64))
 }
