@@ -1,4 +1,4 @@
-# Redis Go Clone
+Keyra
 
 A lightweight, Redis-compatible TCP server written in Go. Supports standard Redis clients including ioredis.js and redis-cli.
 
