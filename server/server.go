@@ -250,6 +250,57 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleGetRange(args)
 	case "CLIENT":
 		return s.handleClient(args)
+	case "SELECT":
+		return s.handleSelect(args)
+	case "MOVE":
+		return s.handleMove(args)
+	case "SWAPDB":
+		return s.handleSwapDB(args)
+	// List commands
+	case "LPUSH":
+		return s.handleLPush(args)
+	case "RPUSH":
+		return s.handleRPush(args)
+	case "LPOP":
+		return s.handleLPop(args)
+	case "RPOP":
+		return s.handleRPop(args)
+	case "LLEN":
+		return s.handleLLen(args)
+	case "LRANGE":
+		return s.handleLRange(args)
+	// Hash commands
+	case "HSET":
+		return s.handleHSet(args)
+	case "HGET":
+		return s.handleHGet(args)
+	case "HDEL":
+		return s.handleHDel(args)
+	case "HEXISTS":
+		return s.handleHExists(args)
+	case "HLEN":
+		return s.handleHLen(args)
+	case "HKEYS":
+		return s.handleHKeys(args)
+	case "HVALS":
+		return s.handleHVals(args)
+	case "HGETALL":
+		return s.handleHGetAll(args)
+	// Set commands
+	case "SADD":
+		return s.handleSAdd(args)
+	case "SREM":
+		return s.handleSRem(args)
+	case "SISMEMBER":
+		return s.handleSIsMember(args)
+	case "SMEMBERS":
+		return s.handleSMembers(args)
+	case "SCARD":
+		return s.handleSCard(args)
+	case "SPOP":
+		return s.handleSPop(args)
+	case "SRANDMEMBER":
+		return s.handleSRandMember(args)
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}
@@ -356,11 +407,11 @@ func (s *Server) handleType(args []string) string {
 	}
 
 	key := args[0]
-	_, exists := s.store.Get(key)
-	if !exists {
+	dataType := s.store.GetType(key)
+	if dataType == -1 {
 		return protocol.EncodeSimpleString("none")
 	}
-	return protocol.EncodeSimpleString("string")
+	return protocol.EncodeSimpleString(dataType.String())
 }
 
 func (s *Server) handleTTL(args []string) string {
@@ -702,4 +753,334 @@ func (s *Server) handleClient(args []string) string {
 	default:
 		return protocol.EncodeError("unknown client subcommand '" + subcommand + "'")
 	}
+}
+
+// Database management commands
+func (s *Server) handleSelect(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'select' command")
+	}
+
+	dbIndex, err := strconv.Atoi(args[0])
+	if err != nil {
+		return protocol.EncodeError("invalid DB index")
+	}
+
+	if !s.store.SelectDB(dbIndex) {
+		return protocol.EncodeError("invalid DB index")
+	}
+
+	return protocol.EncodeSimpleString("OK")
+}
+
+func (s *Server) handleMove(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'move' command")
+	}
+
+	key := args[0]
+	destDB, err := strconv.Atoi(args[1])
+	if err != nil {
+		return protocol.EncodeError("invalid DB index")
+	}
+
+	if s.store.Move(key, destDB) {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handleSwapDB(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'swapdb' command")
+	}
+
+	db1, err1 := strconv.Atoi(args[0])
+	db2, err2 := strconv.Atoi(args[1])
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("invalid DB index")
+	}
+
+	if s.store.SwapDB(db1, db2) {
+		return protocol.EncodeSimpleString("OK")
+	}
+	return protocol.EncodeError("invalid DB index")
+}
+
+// List commands
+func (s *Server) handleLPush(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'lpush' command")
+	}
+
+	key := args[0]
+	values := args[1:]
+	length := s.store.LPush(key, values...)
+	if length == -1 {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeInteger(length)
+}
+
+func (s *Server) handleRPush(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'rpush' command")
+	}
+
+	key := args[0]
+	values := args[1:]
+	length := s.store.RPush(key, values...)
+	if length == -1 {
+		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+	return protocol.EncodeInteger(length)
+}
+
+func (s *Server) handleLPop(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'lpop' command")
+	}
+
+	key := args[0]
+	value, exists := s.store.LPop(key)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(value)
+}
+
+func (s *Server) handleRPop(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'rpop' command")
+	}
+
+	key := args[0]
+	value, exists := s.store.RPop(key)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(value)
+}
+
+func (s *Server) handleLLen(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'llen' command")
+	}
+
+	key := args[0]
+	length := s.store.LLen(key)
+	return protocol.EncodeInteger(length)
+}
+
+func (s *Server) handleLRange(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'lrange' command")
+	}
+
+	key := args[0]
+	start, err1 := strconv.Atoi(args[1])
+	stop, err2 := strconv.Atoi(args[2])
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	values := s.store.LRange(key, start, stop)
+	result := fmt.Sprintf("*%d\r\n", len(values))
+	for _, value := range values {
+		result += protocol.EncodeBulkString(value)
+	}
+	return result
+}
+
+// Hash commands
+func (s *Server) handleHSet(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'hset' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	value := args[2]
+	
+	if s.store.HSet(key, field, value) {
+		return protocol.EncodeInteger(1) // New field
+	}
+	return protocol.EncodeInteger(0) // Updated existing field
+}
+
+func (s *Server) handleHGet(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'hget' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	value, exists := s.store.HGet(key, field)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(value)
+}
+
+func (s *Server) handleHDel(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'hdel' command")
+	}
+
+	key := args[0]
+	fields := args[1:]
+	count := s.store.HDel(key, fields...)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleHExists(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'hexists' command")
+	}
+
+	key := args[0]
+	field := args[1]
+	if s.store.HExists(key, field) {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handleHLen(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'hlen' command")
+	}
+
+	key := args[0]
+	length := s.store.HLen(key)
+	return protocol.EncodeInteger(length)
+}
+
+func (s *Server) handleHKeys(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'hkeys' command")
+	}
+
+	key := args[0]
+	keys := s.store.HKeys(key)
+	result := fmt.Sprintf("*%d\r\n", len(keys))
+	for _, k := range keys {
+		result += protocol.EncodeBulkString(k)
+	}
+	return result
+}
+
+func (s *Server) handleHVals(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'hvals' command")
+	}
+
+	key := args[0]
+	vals := s.store.HVals(key)
+	result := fmt.Sprintf("*%d\r\n", len(vals))
+	for _, v := range vals {
+		result += protocol.EncodeBulkString(v)
+	}
+	return result
+}
+
+func (s *Server) handleHGetAll(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'hgetall' command")
+	}
+
+	key := args[0]
+	hash := s.store.HGetAll(key)
+	result := fmt.Sprintf("*%d\r\n", len(hash)*2)
+	for k, v := range hash {
+		result += protocol.EncodeBulkString(k)
+		result += protocol.EncodeBulkString(v)
+	}
+	return result
+}
+
+// Set commands
+func (s *Server) handleSAdd(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'sadd' command")
+	}
+
+	key := args[0]
+	members := args[1:]
+	count := s.store.SAdd(key, members...)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSRem(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'srem' command")
+	}
+
+	key := args[0]
+	members := args[1:]
+	count := s.store.SRem(key, members...)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSIsMember(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'sismember' command")
+	}
+
+	key := args[0]
+	member := args[1]
+	if s.store.SIsMember(key, member) {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handleSMembers(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'smembers' command")
+	}
+
+	key := args[0]
+	members := s.store.SMembers(key)
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
+	}
+	return result
+}
+
+func (s *Server) handleSCard(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'scard' command")
+	}
+
+	key := args[0]
+	count := s.store.SCard(key)
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleSPop(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'spop' command")
+	}
+
+	key := args[0]
+	member, exists := s.store.SPop(key)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(member)
+}
+
+func (s *Server) handleSRandMember(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'srandmember' command")
+	}
+
+	key := args[0]
+	member, exists := s.store.SRandMember(key)
+	if !exists {
+		return protocol.EncodeBulkString("")
+	}
+	return protocol.EncodeBulkString(member)
 }
