@@ -2,6 +2,7 @@ package store
 
 import (
 	"redis-go-clone/persistence"
+	"strings"
 	"sync"
 	"time"
 )
@@ -149,4 +150,170 @@ func (s *Store) Load() error {
 	s.data = data
 	s.expiration = expiration
 	return nil
+}
+
+func (s *Store) Exists(key string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	_, exists := s.data[key]
+	return exists
+}
+
+func (s *Store) Keys(pattern string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	var keys []string
+	for key := range s.data {
+		s.cleanupExpired(key)
+		if _, exists := s.data[key]; exists {
+			if pattern == "*" || matchPattern(pattern, key) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
+func (s *Store) DBSize() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	count := 0
+	for key := range s.data {
+		s.cleanupExpired(key)
+		if _, exists := s.data[key]; exists {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Store) FlushDB() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = make(map[string]string)
+	s.expiration = make(map[string]time.Time)
+}
+
+func (s *Store) Append(key, value string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpired(key)
+	
+	if existing, exists := s.data[key]; exists {
+		s.data[key] = existing + value
+	} else {
+		s.data[key] = value
+	}
+	return len(s.data[key])
+}
+
+func (s *Store) GetRange(key string, start, end int) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	
+	value, exists := s.data[key]
+	if !exists {
+		return ""
+	}
+	
+	length := len(value)
+	if start < 0 {
+		start = length + start
+	}
+	if end < 0 {
+		end = length + end
+	}
+	
+	if start < 0 {
+		start = 0
+	}
+	if end >= length {
+		end = length - 1
+	}
+	if start > end || start >= length {
+		return ""
+	}
+	
+	return value[start : end+1]
+}
+
+func (s *Store) PExpire(key string, milliseconds int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.data[key]; !exists {
+		return false
+	}
+	s.expiration[key] = time.Now().Add(time.Duration(milliseconds) * time.Millisecond)
+	return true
+}
+
+func (s *Store) PExpireAt(key string, timestampMs int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.data[key]; !exists {
+		return false
+	}
+	s.expiration[key] = time.Unix(0, timestampMs*int64(time.Millisecond))
+	return true
+}
+
+func (s *Store) PTTL(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cleanupExpired(key)
+	if _, exists := s.data[key]; !exists {
+		return -2
+	}
+	if expTime, hasExpiration := s.expiration[key]; hasExpiration {
+		remaining := int(time.Until(expTime).Milliseconds())
+		if remaining < 0 {
+			return -2
+		}
+		return remaining
+	}
+	return -1
+}
+
+func matchPattern(pattern, key string) bool {
+	if pattern == "*" {
+		return true
+	}
+	
+	if !strings.Contains(pattern, "*") && !strings.Contains(pattern, "?") {
+		return pattern == key
+	}
+	
+	return simpleGlobMatch(pattern, key)
+}
+
+func simpleGlobMatch(pattern, str string) bool {
+	if pattern == "" {
+		return str == ""
+	}
+	if pattern == "*" {
+		return true
+	}
+	
+	if len(pattern) > 0 && pattern[0] == '*' {
+		for i := 0; i <= len(str); i++ {
+			if simpleGlobMatch(pattern[1:], str[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	
+	if len(str) == 0 {
+		return false
+	}
+	
+	if len(pattern) > 0 && (pattern[0] == '?' || pattern[0] == str[0]) {
+		return simpleGlobMatch(pattern[1:], str[1:])
+	}
+	
+	return false
 }

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,10 +18,15 @@ import (
 )
 
 type Server struct {
-	address        string
-	store          *store.Store
-	saveInterval   time.Duration
-	shutdownSignal chan os.Signal
+	address           string
+	store             *store.Store
+	saveInterval      time.Duration
+	shutdownSignal    chan os.Signal
+	startTime         time.Time
+	clientCount       int
+	clientMutex       sync.RWMutex
+	password          string
+	authenticatedConns sync.Map
 }
 
 func New(address string) *Server {
@@ -34,19 +40,33 @@ func New(address string) *Server {
 		}
 	}
 	
+	password := os.Getenv("REDIS_PASSWORD")
+	if password != "" {
+		fmt.Println("Password authentication enabled")
+	}
+	
 	return &Server{
 		address:        address,
 		store:          store.New(storagePath),
 		saveInterval:   saveInterval,
 		shutdownSignal: make(chan os.Signal, 1),
+		startTime:      time.Now(),
+		password:       password,
 	}
 }
 
 func NewInMemory(address string) *Server {
+	password := os.Getenv("REDIS_PASSWORD")
+	if password != "" {
+		fmt.Println("Password authentication enabled")
+	}
+	
 	return &Server{
 		address:        address,
 		store:          store.NewInMemory(),
 		shutdownSignal: make(chan os.Signal, 1),
+		startTime:      time.Now(),
+		password:       password,
 	}
 }
 
@@ -106,7 +126,14 @@ func (s *Server) periodicSave() {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	defer conn.Close()
+	s.addClient()
+	connKey := fmt.Sprintf("%p", conn)
+	
+	defer func() {
+		s.removeClient()
+		s.authenticatedConns.Delete(connKey)
+		conn.Close()
+	}()
 
 	parser := protocol.NewParser(conn)
 
@@ -121,12 +148,59 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		command := strings.ToUpper(args[0])
-		response := s.executeCommand(command, args[1:])
+		response := s.executeCommand(command, args[1:], connKey)
 		conn.Write([]byte(response))
 	}
 }
 
-func (s *Server) executeCommand(command string, args []string) string {
+func (s *Server) addClient() {
+	s.clientMutex.Lock()
+	defer s.clientMutex.Unlock()
+	s.clientCount++
+}
+
+func (s *Server) removeClient() {
+	s.clientMutex.Lock()
+	defer s.clientMutex.Unlock()
+	s.clientCount--
+}
+
+func (s *Server) getClientCount() int {
+	s.clientMutex.RLock()
+	defer s.clientMutex.RUnlock()
+	return s.clientCount
+}
+
+func (s *Server) requiresAuth() bool {
+	return s.password != ""
+}
+
+func (s *Server) isAuthenticated(connKey string) bool {
+	if !s.requiresAuth() {
+		return true
+	}
+	_, authenticated := s.authenticatedConns.Load(connKey)
+	return authenticated
+}
+
+func (s *Server) authenticate(connKey string) {
+	s.authenticatedConns.Store(connKey, true)
+}
+
+func (s *Server) executeCommand(command string, args []string, connKey string) string {
+	// Commands that don't require authentication
+	switch command {
+	case "AUTH":
+		return s.handleAuth(args, connKey)
+	case "PING":
+		return s.handlePing(args)
+	}
+	
+	// Check authentication for all other commands
+	if !s.isAuthenticated(connKey) {
+		return protocol.EncodeError("NOAUTH Authentication required")
+	}
+	
 	switch command {
 	case "SET":
 		return s.handleSet(args)
@@ -134,8 +208,6 @@ func (s *Server) executeCommand(command string, args []string) string {
 		return s.handleGet(args)
 	case "DEL":
 		return s.handleDel(args)
-	case "PING":
-		return s.handlePing(args)
 	case "TYPE":
 		return s.handleType(args)
 	case "TTL":
@@ -148,9 +220,57 @@ func (s *Server) executeCommand(command string, args []string) string {
 		return s.handleSave(args)
 	case "BGSAVE":
 		return s.handleBGSave(args)
+	case "STRLEN":
+		return s.handleStrLen(args)
+	case "EXISTS":
+		return s.handleExists(args)
+	case "KEYS":
+		return s.handleKeys(args)
+	case "SCAN":
+		return s.handleScan(args)
+	case "DBSIZE":
+		return s.handleDBSize(args)
+	case "FLUSHDB":
+		return s.handleFlushDB(args)
+	case "FLUSHALL":
+		return s.handleFlushAll(args)
+	case "INFO":
+		return s.handleInfo(args)
+	case "PEXPIRE":
+		return s.handlePExpire(args)
+	case "PEXPIREAT":
+		return s.handlePExpireAt(args)
+	case "PTTL":
+		return s.handlePTTL(args)
+	case "APPEND":
+		return s.handleAppend(args)
+	case "GETRANGE":
+		return s.handleGetRange(args)
+	case "SUBSTR":
+		return s.handleGetRange(args)
+	case "CLIENT":
+		return s.handleClient(args)
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}
+}
+
+func (s *Server) handleAuth(args []string, connKey string) string {
+	if len(args) != 1 {
+		return protocol.EncodeError("wrong number of arguments for 'auth' command")
+	}
+
+	if !s.requiresAuth() {
+		return protocol.EncodeError("ERR Client sent AUTH, but no password is set")
+	}
+
+	providedPassword := args[0]
+	if providedPassword == s.password {
+		s.authenticate(connKey)
+		return protocol.EncodeSimpleString("OK")
+	}
+
+	return protocol.EncodeError("ERR invalid password")
 }
 
 func (s *Server) handleSet(args []string) string {
@@ -315,4 +435,271 @@ func (s *Server) handleBGSave(args []string) string {
 	}()
 
 	return protocol.EncodeSimpleString("Background saving started")
+}
+
+func (s *Server) handleStrLen(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'strlen' command")
+	}
+
+	key := args[0]
+	value, exists := s.store.Get(key)
+	if !exists {
+		return protocol.EncodeInteger(0)
+	}
+	return protocol.EncodeInteger(len(value))
+}
+
+func (s *Server) handleExists(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'exists' command")
+	}
+
+	count := 0
+	for _, key := range args {
+		if s.store.Exists(key) {
+			count++
+		}
+	}
+	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleKeys(args []string) string {
+	pattern := "*"
+	if len(args) > 0 {
+		pattern = args[0]
+	}
+
+	keys := s.store.Keys(pattern)
+	
+	result := fmt.Sprintf("*%d\r\n", len(keys))
+	for _, key := range keys {
+		result += protocol.EncodeBulkString(key)
+	}
+	return result
+}
+
+func (s *Server) handleScan(args []string) string {
+	cursor := 0
+	pattern := "*"
+	count := 10
+
+	if len(args) > 0 {
+		if c, err := strconv.Atoi(args[0]); err == nil {
+			cursor = c
+		}
+	}
+
+	for i := 1; i < len(args); i += 2 {
+		if i+1 >= len(args) {
+			break
+		}
+		switch strings.ToUpper(args[i]) {
+		case "MATCH":
+			pattern = args[i+1]
+		case "COUNT":
+			if c, err := strconv.Atoi(args[i+1]); err == nil && c > 0 {
+				count = c
+			}
+		}
+	}
+
+	allKeys := s.store.Keys(pattern)
+	
+	start := cursor
+	end := cursor + count
+	if end > len(allKeys) {
+		end = len(allKeys)
+	}
+	
+	var keys []string
+	if start < len(allKeys) {
+		keys = allKeys[start:end]
+	}
+	
+	nextCursor := 0
+	if end < len(allKeys) {
+		nextCursor = end
+	}
+
+	result := "*2\r\n"
+	result += protocol.EncodeBulkString(strconv.Itoa(nextCursor))
+	
+	result += fmt.Sprintf("*%d\r\n", len(keys))
+	for _, key := range keys {
+		result += protocol.EncodeBulkString(key)
+	}
+	
+	return result
+}
+
+func (s *Server) handleDBSize(args []string) string {
+	if len(args) > 0 {
+		return protocol.EncodeError("wrong number of arguments for 'dbsize' command")
+	}
+
+	size := s.store.DBSize()
+	return protocol.EncodeInteger(size)
+}
+
+func (s *Server) handleFlushDB(args []string) string {
+	s.store.FlushDB()
+	return protocol.EncodeSimpleString("OK")
+}
+
+func (s *Server) handleFlushAll(args []string) string {
+	s.store.FlushDB()
+	return protocol.EncodeSimpleString("OK")
+}
+
+func (s *Server) handleInfo(args []string) string {
+	section := "default"
+	if len(args) > 0 {
+		section = strings.ToLower(args[0])
+	}
+
+	var info strings.Builder
+	
+	if section == "default" || section == "server" {
+		info.WriteString("# Server\r\n")
+		info.WriteString("redis_version:7.0.0-compatible\r\n")
+		info.WriteString("redis_mode:standalone\r\n")
+		info.WriteString("arch_bits:64\r\n")
+		info.WriteString("server_time_usec:" + strconv.FormatInt(time.Now().UnixMicro(), 10) + "\r\n")
+		uptime := int(time.Since(s.startTime).Seconds())
+		info.WriteString("uptime_in_seconds:" + strconv.Itoa(uptime) + "\r\n")
+		info.WriteString("\r\n")
+	}
+	
+	if section == "default" || section == "clients" {
+		info.WriteString("# Clients\r\n")
+		clientCount := s.getClientCount()
+		info.WriteString("connected_clients:" + strconv.Itoa(clientCount) + "\r\n")
+		info.WriteString("client_longest_output_list:0\r\n")
+		info.WriteString("client_biggest_input_buf:0\r\n")
+		info.WriteString("blocked_clients:0\r\n")
+		info.WriteString("\r\n")
+	}
+	
+	if section == "default" || section == "keyspace" {
+		info.WriteString("# Keyspace\r\n")
+		dbSize := s.store.DBSize()
+		if dbSize > 0 {
+			info.WriteString("db0:keys=" + strconv.Itoa(dbSize) + ",expires=0,avg_ttl=0\r\n")
+		}
+		info.WriteString("\r\n")
+	}
+	
+	if section == "default" || section == "memory" {
+		info.WriteString("# Memory\r\n")
+		info.WriteString("used_memory:1048576\r\n")
+		info.WriteString("used_memory_human:1.00M\r\n")
+		info.WriteString("used_memory_peak:1048576\r\n")
+		info.WriteString("used_memory_peak_human:1.00M\r\n")
+		info.WriteString("\r\n")
+	}
+
+	return protocol.EncodeBulkString(info.String())
+}
+
+func (s *Server) handlePExpire(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'pexpire' command")
+	}
+
+	key := args[0]
+	milliseconds, err := strconv.Atoi(args[1])
+	if err != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	success := s.store.PExpire(key, milliseconds)
+	if success {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handlePExpireAt(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'pexpireat' command")
+	}
+
+	key := args[0]
+	timestampMs, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	success := s.store.PExpireAt(key, timestampMs)
+	if success {
+		return protocol.EncodeInteger(1)
+	}
+	return protocol.EncodeInteger(0)
+}
+
+func (s *Server) handlePTTL(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'pttl' command")
+	}
+
+	key := args[0]
+	pttl := s.store.PTTL(key)
+	return protocol.EncodeInteger(pttl)
+}
+
+func (s *Server) handleAppend(args []string) string {
+	if len(args) < 2 {
+		return protocol.EncodeError("wrong number of arguments for 'append' command")
+	}
+
+	key, value := args[0], args[1]
+	length := s.store.Append(key, value)
+	return protocol.EncodeInteger(length)
+}
+
+func (s *Server) handleGetRange(args []string) string {
+	if len(args) < 3 {
+		return protocol.EncodeError("wrong number of arguments for 'getrange' command")
+	}
+
+	key := args[0]
+	start, err1 := strconv.Atoi(args[1])
+	end, err2 := strconv.Atoi(args[2])
+	
+	if err1 != nil || err2 != nil {
+		return protocol.EncodeError("value is not an integer or out of range")
+	}
+
+	result := s.store.GetRange(key, start, end)
+	return protocol.EncodeBulkString(result)
+}
+
+func (s *Server) handleClient(args []string) string {
+	if len(args) < 1 {
+		return protocol.EncodeError("wrong number of arguments for 'client' command")
+	}
+
+	subcommand := strings.ToUpper(args[0])
+	switch subcommand {
+	case "LIST":
+		clientCount := s.getClientCount()
+		clientInfo := fmt.Sprintf("id=1 addr=127.0.0.1:6379 fd=7 name= age=%d idle=0 flags=N db=0 sub=0 psub=0 multi=-1 qbuf=0 qbuf-free=0 obl=0 oll=0 omem=0 events=r cmd=client\n", 
+			int(time.Since(s.startTime).Seconds()))
+		
+		if clientCount > 1 {
+			for i := 2; i <= clientCount; i++ {
+				clientInfo += fmt.Sprintf("id=%d addr=127.0.0.1:6379 fd=%d name= age=%d idle=0 flags=N db=0 sub=0 psub=0 multi=-1 qbuf=0 qbuf-free=0 obl=0 oll=0 omem=0 events=r cmd=null\n", 
+					i, i+5, int(time.Since(s.startTime).Seconds()))
+			}
+		}
+		
+		return protocol.EncodeBulkString(clientInfo)
+	case "SETNAME":
+		return protocol.EncodeSimpleString("OK")
+	case "GETNAME":
+		return protocol.EncodeBulkString("")
+	default:
+		return protocol.EncodeError("unknown client subcommand '" + subcommand + "'")
+	}
 }
