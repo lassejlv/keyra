@@ -1,0 +1,26 @@
+name: Build And Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  check-commit:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ endsWith(github.event.head_commit.message, '[release]') }}
+    steps:
+      - run: echo "Checking commit message is end with [release]"
+
+  build-docker-image:
+    needs: check-commit
+    if: needs.check-commit.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          docker login --username ${{ secrets.DOCKER_USERNAME }} --password ${{ secrets.DOCKER_PASSWORD }} ghcr.io
+          docker build -t ${{ secrets.DOCKER_URL }} .
+          docker push ${{ secrets.DOCKER_URL }}
+          echo "Build and push completed!"
