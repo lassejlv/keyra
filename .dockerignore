@@ -6,3 +6,4 @@ assets/
 .zed/
 redis_data.rdb
 redis-server
+compose.yml
