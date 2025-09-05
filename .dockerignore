@@ -1,0 +1,8 @@
+ROADMAP.md
+README.md
+assets/
+.cursor/
+.vscode/
+.zed/
+redis_data.rdb
+redis-server
