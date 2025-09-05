@@ -150,6 +150,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 		command := strings.ToUpper(args[0])
 		response := s.executeCommand(command, args[1:], connKey)
 		conn.Write([]byte(response))
+		
+		// Close connection after QUIT command
+		if command == "QUIT" {
+			return
+		}
 	}
 }
 
@@ -208,6 +213,8 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleGet(args)
 	case "DEL":
 		return s.handleDel(args)
+	case "QUIT":
+		return s.handleQuit(args)
 	case "TYPE":
 		return s.handleType(args)
 	case "TTL":
@@ -455,6 +462,10 @@ func (s *Server) handleDel(args []string) string {
 		}
 	}
 	return protocol.EncodeInteger(count)
+}
+
+func (s *Server) handleQuit(args []string) string {
+	return protocol.EncodeSimpleString("OK")
 }
 
 func (s *Server) handlePing(args []string) string {
