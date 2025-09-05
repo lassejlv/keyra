@@ -487,7 +487,7 @@ func (s *Server) handleHello(args []string) string {
 		// Read version from .version file
 		version := "unknown"
 		if versionBytes, err := os.ReadFile(".version"); err == nil {
-			version = strings.TrimSpace(string(versionBytes))
+			version = strings.Replace(strings.TrimSpace(string(versionBytes)), "v", "", 1)
 		}
 		
 		// Return RESP3 map format
@@ -500,7 +500,7 @@ func (s *Server) handleHello(args []string) string {
 		info.WriteString("+id\r\n:1\r\n")
 		info.WriteString("+mode\r\n+standalone\r\n")
 		info.WriteString("+role\r\n+master\r\n")
-		info.WriteString("+modules\r\n*0\r\n") // Empty array for modules
+		info.WriteString("+modules\r\n*0\r\n") 
 		
 		return info.String()
 	}
