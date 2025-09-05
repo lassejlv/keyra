@@ -481,7 +481,6 @@ func (s *Server) handleHello(args []string) string {
 	}
 	
 	if protocolVersion == 3 {
-		// RESP3 response - return a map
 		var info strings.Builder
 		
 		// Read version from .version file
@@ -491,7 +490,7 @@ func (s *Server) handleHello(args []string) string {
 		}
 		
 		// Return RESP3 map format
-		info.WriteString("%7\r\n") // Map with 7 key-value pairs
+		info.WriteString("%7\r\n") 
 		info.WriteString("+server\r\n+redis\r\n")
 		info.WriteString("+version\r\n+")
 		info.WriteString(version)
@@ -733,7 +732,7 @@ func (s *Server) handleInfo(args []string) string {
 	if err != nil {
 		version = "unknown"
 	} else {
-		version = string(versionBytes)
+		version = strings.Replace(strings.TrimSpace(string(versionBytes)), "v", "", 1)
 		}
 	
 	if section == "default" || section == "server" {
