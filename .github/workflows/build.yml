@@ -6,16 +6,7 @@ on:
       - main
 
 jobs:
-  check-commit:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ endsWith(github.event.head_commit.message, '[release]') }}
-    steps:
-      - run: echo "Checking commit message is end with [release]"
-
   build-docker-image:
-    needs: check-commit
-    if: needs.check-commit.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
