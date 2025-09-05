@@ -213,6 +213,8 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleGet(args)
 	case "DEL":
 		return s.handleDel(args)
+	case "HELLO":
+		return s.handleHello(args)
 	case "QUIT":
 		return s.handleQuit(args)
 	case "TYPE":
@@ -465,6 +467,10 @@ func (s *Server) handleDel(args []string) string {
 }
 
 func (s *Server) handleQuit(args []string) string {
+	return protocol.EncodeSimpleString("OK")
+}
+
+func (s *Server) handleHello(args []string) string {
 	return protocol.EncodeSimpleString("OK")
 }
 
