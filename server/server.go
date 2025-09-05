@@ -43,6 +43,8 @@ func New(address string) *Server {
 	password := os.Getenv("REDIS_PASSWORD")
 	if password != "" {
 		fmt.Println("Password authentication enabled")
+	} else {
+		fmt.Println("WARN! Password authentication disabled")
 	}
 	
 	return &Server{
@@ -116,8 +118,6 @@ func (s *Server) periodicSave() {
 		case <-ticker.C:
 			if err := s.store.Save(); err != nil {
 				log.Printf("Error during periodic save: %v", err)
-			} else {
-				log.Println("Periodic save completed")
 			}
 		case <-s.shutdownSignal:
 			return
@@ -471,6 +471,41 @@ func (s *Server) handleQuit(args []string) string {
 }
 
 func (s *Server) handleHello(args []string) string {
+	// Default to RESP2 if no version specified
+	protocolVersion := 2
+	
+	if len(args) > 0 {
+		if version, err := strconv.Atoi(args[0]); err == nil && (version == 2 || version == 3) {
+			protocolVersion = version
+		}
+	}
+	
+	if protocolVersion == 3 {
+		// RESP3 response - return a map
+		var info strings.Builder
+		
+		// Read version from .version file
+		version := "unknown"
+		if versionBytes, err := os.ReadFile(".version"); err == nil {
+			version = strings.TrimSpace(string(versionBytes))
+		}
+		
+		// Return RESP3 map format
+		info.WriteString("%7\r\n") // Map with 7 key-value pairs
+		info.WriteString("+server\r\n+redis\r\n")
+		info.WriteString("+version\r\n+")
+		info.WriteString(version)
+		info.WriteString("\r\n")
+		info.WriteString("+proto\r\n:3\r\n")
+		info.WriteString("+id\r\n:1\r\n")
+		info.WriteString("+mode\r\n+standalone\r\n")
+		info.WriteString("+role\r\n+master\r\n")
+		info.WriteString("+modules\r\n*0\r\n") // Empty array for modules
+		
+		return info.String()
+	}
+	
+	// RESP2 response - return simple OK
 	return protocol.EncodeSimpleString("OK")
 }
 
@@ -690,10 +725,20 @@ func (s *Server) handleInfo(args []string) string {
 	}
 
 	var info strings.Builder
+
+	var version string
+
+	// Read from .version file
+	versionBytes, err := os.ReadFile(".version")
+	if err != nil {
+		version = "unknown"
+	} else {
+		version = string(versionBytes)
+		}
 	
 	if section == "default" || section == "server" {
 		info.WriteString("# Server\r\n")
-		info.WriteString("redis_version:7.0.0-compatible\r\n")
+		info.WriteString("redis_version:" + version + "\r\n")
 		info.WriteString("redis_mode:standalone\r\n")
 		info.WriteString("arch_bits:64\r\n")
 		info.WriteString("server_time_usec:" + strconv.FormatInt(time.Now().UnixMicro(), 10) + "\r\n")
