@@ -1,0 +1,11 @@
+services:
+  keyra:
+    image: ghcr.io/lassejlv/keyra:latest
+    ports:
+      - 6379:6379
+    environment:
+      - REDIS_PASSWORD=bob123
+      - REDIS_DATA_DIR=/data/keyra
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
