@@ -1,12 +1,19 @@
-
 <img width="256" height="256" alt="keyra" src="https://github.com/user-attachments/assets/89550895-635c-48e0-954e-a00ce0a5f27d" />
 
 ## Keyra
 
-A lightweight, Redis-compatible server written in Go. 
+A lightweight, Redis-compatible server written in Go.
 
 > [!WARNING]
 > This is a work in progress, it is not ready for production use yet.
+
+## Running
+
+You can simply pull our docker image
+
+```bash
+docker run -d -e REDIS_PASSWORD=bob123 ghcr.io/lassejlv/keyra:latest
+```
 
 ## Features
 
