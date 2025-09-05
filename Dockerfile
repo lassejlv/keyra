@@ -26,6 +26,9 @@ WORKDIR /root/
 # Copy the binary from builder stage
 COPY --from=builder /app/redis-server .
 
+# Copy the version file from builder stage
+COPY --from=builder /app/.version .
+
 # Create data directory
 RUN mkdir -p /data
 
