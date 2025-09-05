@@ -5,6 +5,9 @@
 
 A lightweight, Redis-compatible server written in Go. 
 
+> [!WARNING]
+> This is a work in progress, it is not ready for production use yet.
+
 ## Features
 
 - **Core Commands**: SET, GET, DEL, TYPE, TTL, PING, EXPIRE, EXPIREAT, AUTH
@@ -20,7 +23,5 @@ A lightweight, Redis-compatible server written in Go.
 
 Configure via environment variables:
 
-- `REDIS_STORAGE_PATH`: Custom file path for persistence
 - `REDIS_DATA_DIR`: Custom directory (uses redis_data.rdb)
-- `REDIS_SAVE_INTERVAL`: Periodic save frequency (e.g., 30s, 5m)
 - `REDIS_PASSWORD`: Enable password authentication
