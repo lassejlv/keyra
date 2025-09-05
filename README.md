@@ -1,5 +1,5 @@
 
-<img width="512" height="512" alt="keyra" src="https://github.com/user-attachments/assets/89550895-635c-48e0-954e-a00ce0a5f27d" />
+<img width="256" height="256" alt="keyra" src="https://github.com/user-attachments/assets/89550895-635c-48e0-954e-a00ce0a5f27d" />
 
 ## Keyra
 
