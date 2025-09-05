@@ -1,6 +1,9 @@
-Keyra
 
-A lightweight, Redis-compatible TCP server written in Go. Supports standard Redis clients including ioredis.js and redis-cli.
+<img width="512" height="512" alt="keyra" src="https://github.com/user-attachments/assets/89550895-635c-48e0-954e-a00ce0a5f27d" />
+
+## Keyra
+
+A lightweight, Redis-compatible server written in Go. 
 
 ## Features
 
@@ -21,7 +24,3 @@ Configure via environment variables:
 - `REDIS_DATA_DIR`: Custom directory (uses redis_data.rdb)
 - `REDIS_SAVE_INTERVAL`: Periodic save frequency (e.g., 30s, 5m)
 - `REDIS_PASSWORD`: Enable password authentication
-
-## Compatibility
-
-Compatible with standard Redis clients and GUI tools like Redis Desktop Manager.
