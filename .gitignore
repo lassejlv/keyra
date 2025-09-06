@@ -1,2 +1,3 @@
 redis_data.rdb
 redis-server
+redis-go-clone
