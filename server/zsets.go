@@ -17,7 +17,20 @@ func (s *Server) handleZAdd(args []string) string {
 	key := args[0]
 	scoreMembers := args[1:]
 	
-	added := s.store.ZAdd(key, scoreMembers)
+	if len(scoreMembers)%2 != 0 {
+		return protocol.EncodeError("wrong number of arguments for 'zadd' command")
+	}
+	
+	members := make(map[string]float64)
+	for i := 0; i < len(scoreMembers); i += 2 {
+		score, err := strconv.ParseFloat(scoreMembers[i], 64)
+		if err != nil {
+			return protocol.EncodeError("value is not a valid float")
+		}
+		members[scoreMembers[i+1]] = score
+	}
+	
+	added := s.store.ZAdd(key, members)
 	if added == -1 {
 		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
@@ -31,7 +44,7 @@ func (s *Server) handleZRem(args []string) string {
 
 	key := args[0]
 	members := args[1:]
-	count := s.store.ZRem(key, members)
+	count := s.store.ZRem(key, members...)
 	return protocol.EncodeInteger(count)
 }
 
@@ -52,22 +65,13 @@ func (s *Server) handleZRange(args []string) string {
 		withScores = true
 	}
 
-	members := s.store.ZRange(key, start, stop, false)
+	members := s.store.ZRange(key, start, stop, withScores)
 	
-	if withScores {
-		result := fmt.Sprintf("*%d\r\n", len(members)*2)
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
-		}
-		return result
-	} else {
-		result := fmt.Sprintf("*%d\r\n", len(members))
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-		}
-		return result
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
 	}
+	return result
 }
 
 func (s *Server) handleZRevRange(args []string) string {
@@ -87,22 +91,13 @@ func (s *Server) handleZRevRange(args []string) string {
 		withScores = true
 	}
 
-	members := s.store.ZRange(key, start, stop, true)
+	members := s.store.ZRevRange(key, start, stop, withScores)
 	
-	if withScores {
-		result := fmt.Sprintf("*%d\r\n", len(members)*2)
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
-		}
-		return result
-	} else {
-		result := fmt.Sprintf("*%d\r\n", len(members))
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-		}
-		return result
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
 	}
+	return result
 }
 
 func (s *Server) handleZRangeByScore(args []string) string {
@@ -122,22 +117,13 @@ func (s *Server) handleZRangeByScore(args []string) string {
 		withScores = true
 	}
 
-	members := s.store.ZRangeByScore(key, min, max, false)
+	members := s.store.ZRangeByScore(key, min, max, withScores)
 	
-	if withScores {
-		result := fmt.Sprintf("*%d\r\n", len(members)*2)
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
-		}
-		return result
-	} else {
-		result := fmt.Sprintf("*%d\r\n", len(members))
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-		}
-		return result
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
 	}
+	return result
 }
 
 func (s *Server) handleZRevRangeByScore(args []string) string {
@@ -157,22 +143,13 @@ func (s *Server) handleZRevRangeByScore(args []string) string {
 		withScores = true
 	}
 
-	members := s.store.ZRangeByScore(key, min, max, true)
+	members := s.store.ZRevRangeByScore(key, max, min, withScores)
 	
-	if withScores {
-		result := fmt.Sprintf("*%d\r\n", len(members)*2)
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-			result += protocol.EncodeBulkString(strconv.FormatFloat(member.Score, 'g', -1, 64))
-		}
-		return result
-	} else {
-		result := fmt.Sprintf("*%d\r\n", len(members))
-		for _, member := range members {
-			result += protocol.EncodeBulkString(member.Member)
-		}
-		return result
+	result := fmt.Sprintf("*%d\r\n", len(members))
+	for _, member := range members {
+		result += protocol.EncodeBulkString(member)
 	}
+	return result
 }
 
 func (s *Server) handleZRank(args []string) string {
@@ -182,8 +159,8 @@ func (s *Server) handleZRank(args []string) string {
 
 	key := args[0]
 	member := args[1]
-	rank := s.store.ZRank(key, member, false)
-	if rank == -1 {
+	rank, exists := s.store.ZRank(key, member)
+	if !exists {
 		return protocol.EncodeBulkString("")
 	}
 	return protocol.EncodeInteger(rank)
@@ -196,8 +173,8 @@ func (s *Server) handleZRevRank(args []string) string {
 
 	key := args[0]
 	member := args[1]
-	rank := s.store.ZRank(key, member, true)
-	if rank == -1 {
+	rank, exists := s.store.ZRevRank(key, member)
+	if !exists {
 		return protocol.EncodeBulkString("")
 	}
 	return protocol.EncodeInteger(rank)

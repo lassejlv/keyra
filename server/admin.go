@@ -131,8 +131,10 @@ func (s *Server) handleInfo(args []string) string {
 	
 	if section == "default" || section == "clients" {
 		info.WriteString("# Clients\r\n")
-		clientCount := s.getClientCount()
-		info.WriteString("connected_clients:" + strconv.Itoa(clientCount) + "\r\n")
+		connStats := s.connPool.GetStats()
+		info.WriteString("connected_clients:" + strconv.Itoa(connStats.ActiveConnections) + "\r\n")
+		info.WriteString("max_clients:" + strconv.Itoa(connStats.MaxConnections) + "\r\n")
+		info.WriteString("total_connections:" + strconv.Itoa(connStats.TotalConnections) + "\r\n")
 		info.WriteString("client_longest_output_list:0\r\n")
 		info.WriteString("client_biggest_input_buf:0\r\n")
 		info.WriteString("blocked_clients:0\r\n")
@@ -157,6 +159,10 @@ func (s *Server) handleInfo(args []string) string {
 		info.WriteString("used_memory_human:1.00M\r\n")
 		info.WriteString("used_memory_peak:1048576\r\n")
 		info.WriteString("used_memory_peak_human:1.00M\r\n")
+		info.WriteString("maxmemory:" + strconv.Itoa(s.config.MaxMemoryMB*1024*1024) + "\r\n")
+		info.WriteString("maxmemory_human:" + strconv.Itoa(s.config.MaxMemoryMB) + "M\r\n")
+		info.WriteString("maxmemory_policy:noeviction\r\n")
+		info.WriteString("mem_fragmentation_ratio:1.00\r\n")
 		info.WriteString("\r\n")
 	}
 

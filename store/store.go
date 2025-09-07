@@ -39,12 +39,63 @@ type ZSetMember struct {
 }
 
 type RedisValue struct {
-	Type       DataType
-	StringVal  string
-	ListVal    []string
-	HashVal    map[string]string
-	SetVal     map[string]bool
-	ZSetVal    *ZSet
+	Type  DataType
+	Value interface{}
+}
+
+func StringValue(s string) *RedisValue {
+	return &RedisValue{Type: StringType, Value: s}
+}
+
+func ListValue(l []string) *RedisValue {
+	return &RedisValue{Type: ListType, Value: l}
+}
+
+func HashValue(h map[string]string) *RedisValue {
+	return &RedisValue{Type: HashType, Value: h}
+}
+
+func SetValue(s map[string]bool) *RedisValue {
+	return &RedisValue{Type: SetType, Value: s}
+}
+
+func ZSetValue(zs *ZSet) *RedisValue {
+	return &RedisValue{Type: ZSetType, Value: zs}
+}
+
+func (rv *RedisValue) String() string {
+	if rv.Type != StringType {
+		panic("value is not a string")
+	}
+	return rv.Value.(string)
+}
+
+func (rv *RedisValue) List() []string {
+	if rv.Type != ListType {
+		panic("value is not a list")
+	}
+	return rv.Value.([]string)
+}
+
+func (rv *RedisValue) Hash() map[string]string {
+	if rv.Type != HashType {
+		panic("value is not a hash")
+	}
+	return rv.Value.(map[string]string)
+}
+
+func (rv *RedisValue) Set() map[string]bool {
+	if rv.Type != SetType {
+		panic("value is not a set")
+	}
+	return rv.Value.(map[string]bool)
+}
+
+func (rv *RedisValue) ZSet() *ZSet {
+	if rv.Type != ZSetType {
+		panic("value is not a zset")
+	}
+	return rv.Value.(*ZSet)
 }
 
 type ZSet struct {
@@ -123,10 +174,7 @@ func (s *Store) Set(key, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	db := s.getCurrentDB()
-	db.data[key] = &RedisValue{
-		Type:      StringType,
-		StringVal: value,
-	}
+	db.data[key] = StringValue(value)
 	delete(db.expiration, key)
 }
 
@@ -139,7 +187,7 @@ func (s *Store) Get(key string) (string, bool) {
 	if !exists || value.Type != StringType {
 		return "", false
 	}
-	return value.StringVal, true
+	return value.String(), true
 }
 
 func (s *Store) Del(key string) bool {
@@ -230,7 +278,7 @@ func (s *Store) Save() error {
 	dataCopy := make(map[string]string)
 	for k, v := range db.data {
 		if v.Type == StringType {
-			dataCopy[k] = v.StringVal
+			dataCopy[k] = v.String()
 		}
 		// TODO: Serialize other data types
 	}
@@ -261,10 +309,7 @@ func (s *Store) Load() error {
 	
 	// Convert string data to RedisValue format
 	for k, v := range data {
-		db.data[k] = &RedisValue{
-			Type:      StringType,
-			StringVal: v,
-		}
+		db.data[k] = StringValue(v)
 	}
 	
 	db.expiration = expiration
