@@ -21,12 +21,40 @@ type ConnectionPool struct {
 }
 
 type ClientConnection struct {
-	conn         net.Conn
+	conn         *TrackedConn
 	id           string
 	lastActivity time.Time
 	ctx          context.Context
 	cancel       context.CancelFunc
 	writeMu      sync.Mutex
+}
+
+type TrackedConn struct {
+	net.Conn
+	server *Server
+}
+
+func NewTrackedConn(conn net.Conn, server *Server) *TrackedConn {
+	return &TrackedConn{
+		Conn:   conn,
+		server: server,
+	}
+}
+
+func (tc *TrackedConn) Read(b []byte) (n int, err error) {
+	n, err = tc.Conn.Read(b)
+	if n > 0 {
+		tc.server.networkStats.AddBytesReceived(int64(n))
+	}
+	return n, err
+}
+
+func (tc *TrackedConn) Write(b []byte) (n int, err error) {
+	n, err = tc.Conn.Write(b)
+	if n > 0 {
+		tc.server.networkStats.AddBytesSent(int64(n))
+	}
+	return n, err
 }
 
 type ConnectionConfig struct {
@@ -69,8 +97,9 @@ func (cp *ConnectionPool) AcceptConnection(conn net.Conn) (*ClientConnection, er
 	connID := fmt.Sprintf("%p", conn)
 	ctx, cancel := context.WithCancel(context.Background())
 	
+	trackedConn := NewTrackedConn(conn, cp.server)
 	clientConn := &ClientConnection{
-		conn:         conn,
+		conn:         trackedConn,
 		id:           connID,
 		lastActivity: time.Now(),
 		ctx:          ctx,
@@ -81,6 +110,8 @@ func (cp *ConnectionPool) AcceptConnection(conn net.Conn) (*ClientConnection, er
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(30 * time.Second)
 	}
+	
+	cp.server.networkStats.AddConnection()
 	
 	cp.mu.Lock()
 	cp.connections[connID] = clientConn

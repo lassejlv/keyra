@@ -165,6 +165,40 @@ func (s *Server) handleInfo(args []string) string {
 		info.WriteString("mem_fragmentation_ratio:1.00\r\n")
 		info.WriteString("\r\n")
 	}
+	
+	if section == "default" || section == "stats" {
+		info.WriteString("# Stats\r\n")
+		
+		bytesReceived, bytesSent, totalConns, totalCmds, rxRate, txRate, cmdRate := s.networkStats.GetStats()
+		
+		info.WriteString("total_connections_received:" + strconv.FormatInt(totalConns, 10) + "\r\n")
+		info.WriteString("total_commands_processed:" + strconv.FormatInt(totalCmds, 10) + "\r\n")
+		info.WriteString("instantaneous_ops_per_sec:" + strconv.FormatFloat(cmdRate, 'f', 2, 64) + "\r\n")
+		info.WriteString("total_net_input_bytes:" + strconv.FormatInt(bytesReceived, 10) + "\r\n")
+		info.WriteString("total_net_output_bytes:" + strconv.FormatInt(bytesSent, 10) + "\r\n")
+		info.WriteString("instantaneous_input_kbps:" + strconv.FormatFloat(rxRate/1024, 'f', 2, 64) + "\r\n")
+		info.WriteString("instantaneous_output_kbps:" + strconv.FormatFloat(txRate/1024, 'f', 2, 64) + "\r\n")
+		info.WriteString("rejected_connections:0\r\n")
+		info.WriteString("sync_full:0\r\n")
+		info.WriteString("sync_partial_ok:0\r\n")
+		info.WriteString("sync_partial_err:0\r\n")
+		info.WriteString("expired_keys:0\r\n")
+		info.WriteString("expired_stale_perc:0.00\r\n")
+		info.WriteString("expired_time_cap_reached_count:0\r\n")
+		info.WriteString("evicted_keys:0\r\n")
+		info.WriteString("keyspace_hits:0\r\n")
+		info.WriteString("keyspace_misses:0\r\n")
+		info.WriteString("pubsub_channels:0\r\n")
+		info.WriteString("pubsub_patterns:0\r\n")
+		info.WriteString("latest_fork_usec:0\r\n")
+		info.WriteString("migrate_cached_sockets:0\r\n")
+		info.WriteString("slave_expires_tracked_keys:0\r\n")
+		info.WriteString("active_defrag_hits:0\r\n")
+		info.WriteString("active_defrag_misses:0\r\n")
+		info.WriteString("active_defrag_key_hits:0\r\n")
+		info.WriteString("active_defrag_key_misses:0\r\n")
+		info.WriteString("\r\n")
+	}
 
 	return protocol.EncodeBulkString(info.String())
 }
