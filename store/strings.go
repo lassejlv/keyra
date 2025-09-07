@@ -8,10 +8,7 @@ func (s *Store) SetWithExpiration(key, value string, expiration time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	db := s.getCurrentDB()
-	db.data[key] = &RedisValue{
-		Type:      StringType,
-		StringVal: value,
-	}
+	db.data[key] = StringValue(value)
 	db.expiration[key] = expiration
 }
 
@@ -22,13 +19,11 @@ func (s *Store) Append(key, value string) int {
 	db := s.getCurrentDB()
 	
 	if existing, exists := db.data[key]; exists && existing.Type == StringType {
-		existing.StringVal += value
-		return len(existing.StringVal)
+		newValue := existing.String() + value
+		db.data[key] = StringValue(newValue)
+		return len(newValue)
 	} else {
-		db.data[key] = &RedisValue{
-			Type:      StringType,
-			StringVal: value,
-		}
+		db.data[key] = StringValue(value)
 		return len(value)
 	}
 }
@@ -44,7 +39,8 @@ func (s *Store) GetRange(key string, start, end int) string {
 		return ""
 	}
 	
-	length := len(value.StringVal)
+	str := value.String()
+	length := len(str)
 	if start < 0 {
 		start = length + start
 	}
@@ -62,5 +58,5 @@ func (s *Store) GetRange(key string, start, end int) string {
 		return ""
 	}
 	
-	return value.StringVal[start : end+1]
+	return str[start : end+1]
 }

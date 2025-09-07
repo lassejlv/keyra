@@ -72,11 +72,11 @@ func (s *Server) handleSPop(args []string) string {
 	}
 
 	key := args[0]
-	member, exists := s.store.SPop(key)
-	if !exists {
+	members := s.store.SPop(key, 1)
+	if len(members) == 0 {
 		return protocol.EncodeBulkString("")
 	}
-	return protocol.EncodeBulkString(member)
+	return protocol.EncodeBulkString(members[0])
 }
 
 func (s *Server) handleSRandMember(args []string) string {
@@ -85,11 +85,11 @@ func (s *Server) handleSRandMember(args []string) string {
 	}
 
 	key := args[0]
-	member, exists := s.store.SRandMember(key)
-	if !exists {
+	members := s.store.SRandMember(key, 1)
+	if len(members) == 0 {
 		return protocol.EncodeBulkString("")
 	}
-	return protocol.EncodeBulkString(member)
+	return protocol.EncodeBulkString(members[0])
 }
 
 func (s *Server) handleSInter(args []string) string {
@@ -97,7 +97,7 @@ func (s *Server) handleSInter(args []string) string {
 		return protocol.EncodeError("wrong number of arguments for 'sinter' command")
 	}
 
-	members := s.store.SInter(args)
+	members := s.store.SInter(args...)
 	result := fmt.Sprintf("*%d\r\n", len(members))
 	for _, member := range members {
 		result += protocol.EncodeBulkString(member)
@@ -110,7 +110,7 @@ func (s *Server) handleSUnion(args []string) string {
 		return protocol.EncodeError("wrong number of arguments for 'sunion' command")
 	}
 
-	members := s.store.SUnion(args)
+	members := s.store.SUnion(args...)
 	result := fmt.Sprintf("*%d\r\n", len(members))
 	for _, member := range members {
 		result += protocol.EncodeBulkString(member)
@@ -123,7 +123,7 @@ func (s *Server) handleSDiff(args []string) string {
 		return protocol.EncodeError("wrong number of arguments for 'sdiff' command")
 	}
 
-	members := s.store.SDiff(args)
+	members := s.store.SDiff(args...)
 	result := fmt.Sprintf("*%d\r\n", len(members))
 	for _, member := range members {
 		result += protocol.EncodeBulkString(member)
@@ -138,7 +138,7 @@ func (s *Server) handleSInterStore(args []string) string {
 
 	destination := args[0]
 	keys := args[1:]
-	count := s.store.SInterStore(destination, keys)
+	count := s.store.SInterStore(destination, keys...)
 	return protocol.EncodeInteger(count)
 }
 
@@ -149,7 +149,7 @@ func (s *Server) handleSUnionStore(args []string) string {
 
 	destination := args[0]
 	keys := args[1:]
-	count := s.store.SUnionStore(destination, keys)
+	count := s.store.SUnionStore(destination, keys...)
 	return protocol.EncodeInteger(count)
 }
 
@@ -160,7 +160,7 @@ func (s *Server) handleSDiffStore(args []string) string {
 
 	destination := args[0]
 	keys := args[1:]
-	count := s.store.SDiffStore(destination, keys)
+	count := s.store.SDiffStore(destination, keys...)
 	return protocol.EncodeInteger(count)
 }
 

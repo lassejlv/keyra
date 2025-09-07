@@ -25,9 +25,31 @@ type Server struct {
 	clientMutex       sync.RWMutex
 	password          string
 	authenticatedConns sync.Map
+	connPool          *ConnectionPool
+	config            ServerConfig
+}
+
+type ServerConfig struct {
+	ConnectionConfig ConnectionConfig
+	MaxMemoryMB      int
+	MaxKeySize       int
+	MaxValueSize     int
+}
+
+func DefaultServerConfig() ServerConfig {
+	return ServerConfig{
+		ConnectionConfig: DefaultConnectionConfig(),
+		MaxMemoryMB:      1024,
+		MaxKeySize:       1024,
+		MaxValueSize:     512 * 1024 * 1024,
+	}
 }
 
 func New(address string) *Server {
+	return NewWithConfig(address, DefaultServerConfig())
+}
+
+func NewWithConfig(address string, config ServerConfig) *Server {
 	storagePath := persistence.GetStoragePath()
 	fmt.Printf("Using storage path: %s\n", storagePath)
 	
@@ -45,29 +67,49 @@ func New(address string) *Server {
 		fmt.Println("WARN! Password authentication disabled")
 	}
 	
-	return &Server{
+	server := &Server{
 		address:        address,
 		store:          store.New(storagePath),
 		saveInterval:   saveInterval,
 		shutdownSignal: make(chan os.Signal, 1),
 		startTime:      time.Now(),
 		password:       password,
+		config:         config,
 	}
+	
+	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
+	
+	fmt.Printf("Server configuration: Max connections: %d, Max memory: %dMB\n", 
+		config.ConnectionConfig.MaxConnections, config.MaxMemoryMB)
+	
+	return server
 }
 
 func NewInMemory(address string) *Server {
+	return NewInMemoryWithConfig(address, DefaultServerConfig())
+}
+
+func NewInMemoryWithConfig(address string, config ServerConfig) *Server {
 	password := os.Getenv("REDIS_PASSWORD")
 	if password != "" {
 		fmt.Println("Password authentication enabled")
 	}
 	
-	return &Server{
+	server := &Server{
 		address:        address,
 		store:          store.NewInMemory(),
 		shutdownSignal: make(chan os.Signal, 1),
 		startTime:      time.Now(),
 		password:       password,
+		config:         config,
 	}
+	
+	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
+	
+	fmt.Printf("In-memory server configuration: Max connections: %d, Max memory: %dMB\n", 
+		config.ConnectionConfig.MaxConnections, config.MaxMemoryMB)
+	
+	return server
 }
 
 func (s *Server) Start() error {
@@ -91,12 +133,22 @@ func (s *Server) Start() error {
 			if err != nil {
 				continue
 			}
-			go s.handleConnection(conn)
+			
+			clientConn, err := s.connPool.AcceptConnection(conn)
+			if err != nil {
+				fmt.Printf("Connection rejected: %v\n", err)
+				conn.Close()
+				continue
+			}
+			
+			go s.handlePooledConnection(clientConn)
 		}
 	}()
 
 	<-s.shutdownSignal
 	fmt.Println("\nShutting down server...")
+	
+	s.connPool.Close()
 	
 	if err := s.store.Save(); err != nil {
 		fmt.Printf("Error saving data on shutdown: %v", err)
@@ -149,9 +201,57 @@ func (s *Server) handleConnection(conn net.Conn) {
 		response := s.executeCommand(command, args[1:], connKey)
 		conn.Write([]byte(response))
 		
-		// Close connection after QUIT command
 		if command == "QUIT" {
 			return
+		}
+	}
+}
+
+func (s *Server) handlePooledConnection(clientConn *ClientConnection) {
+	s.addClient()
+	connKey := clientConn.id
+	
+	defer func() {
+		s.removeClient()
+		s.authenticatedConns.Delete(connKey)
+		s.connPool.RemoveConnection(connKey)
+		clientConn.conn.Close()
+	}()
+
+	parser := protocol.NewParser(clientConn.conn)
+
+	for {
+		clientConn.SetReadTimeout(s.connPool.readTimeout)
+		
+		s.connPool.UpdateActivity(connKey)
+		
+		args, err := parser.Parse()
+		if err != nil {
+			return
+		}
+
+		if len(args) == 0 {
+			continue
+		}
+
+		command := strings.ToUpper(args[0])
+		response := s.executeCommand(command, args[1:], connKey)
+		
+		err = clientConn.WriteWithTimeout([]byte(response), s.connPool.writeTimeout)
+		if err != nil {
+			return
+		}
+		
+		parser.ReleaseArgs(args)
+		
+		if command == "QUIT" {
+			return
+		}
+		
+		select {
+		case <-clientConn.ctx.Done():
+			return
+		default:
 		}
 	}
 }

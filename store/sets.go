@@ -1,30 +1,38 @@
 package store
 
-// Set operations
+import (
+	"math/rand"
+)
+
 func (s *Store) SAdd(key string, members ...string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	db := s.getCurrentDB()
 	
 	value, exists := db.data[key]
+	var set map[string]bool
+	
 	if !exists {
-		value = &RedisValue{
-			Type:   SetType,
-			SetVal: make(map[string]bool),
-		}
-		db.data[key] = value
+		set = make(map[string]bool)
 	} else if value.Type != SetType {
-		return 0 // Wrong type error
+		return 0
+	} else {
+		existingSet := value.Set()
+		set = make(map[string]bool)
+		for k, v := range existingSet {
+			set[k] = v
+		}
 	}
 	
 	count := 0
 	for _, member := range members {
-		if !value.SetVal[member] {
-			value.SetVal[member] = true
+		if !set[member] {
+			set[member] = true
 			count++
 		}
 	}
 	
+	db.data[key] = SetValue(set)
 	return count
 }
 
@@ -38,17 +46,24 @@ func (s *Store) SRem(key string, members ...string) int {
 		return 0
 	}
 	
+	set := value.Set()
+	newSet := make(map[string]bool)
+	for k, v := range set {
+		newSet[k] = v
+	}
+	
 	count := 0
 	for _, member := range members {
-		if value.SetVal[member] {
-			delete(value.SetVal, member)
+		if newSet[member] {
+			delete(newSet, member)
 			count++
 		}
 	}
 	
-	if len(value.SetVal) == 0 {
+	if len(newSet) == 0 {
 		delete(db.data, key)
-		delete(db.expiration, key)
+	} else {
+		db.data[key] = SetValue(newSet)
 	}
 	
 	return count
@@ -65,7 +80,7 @@ func (s *Store) SIsMember(key, member string) bool {
 		return false
 	}
 	
-	return value.SetVal[member]
+	return value.Set()[member]
 }
 
 func (s *Store) SMembers(key string) []string {
@@ -79,10 +94,12 @@ func (s *Store) SMembers(key string) []string {
 		return []string{}
 	}
 	
-	members := make([]string, 0, len(value.SetVal))
-	for member := range value.SetVal {
+	set := value.Set()
+	members := make([]string, 0, len(set))
+	for member := range set {
 		members = append(members, member)
 	}
+	
 	return members
 }
 
@@ -97,268 +114,239 @@ func (s *Store) SCard(key string) int {
 		return 0
 	}
 	
-	return len(value.SetVal)
+	return len(value.Set())
 }
 
-func (s *Store) SPop(key string) (string, bool) {
+func (s *Store) SPop(key string, count int) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	db := s.getCurrentDB()
 	
 	value, exists := db.data[key]
-	if !exists || value.Type != SetType || len(value.SetVal) == 0 {
-		return "", false
+	if !exists || value.Type != SetType {
+		return []string{}
 	}
 	
-	// Get a random member
-	for member := range value.SetVal {
-		delete(value.SetVal, member)
-		
-		if len(value.SetVal) == 0 {
-			delete(db.data, key)
-			delete(db.expiration, key)
+	set := value.Set()
+	if count <= 0 || len(set) == 0 {
+		return []string{}
+	}
+	
+	if count >= len(set) {
+		members := make([]string, 0, len(set))
+		for member := range set {
+			members = append(members, member)
 		}
-		
-		return member, true
+		delete(db.data, key)
+		return members
 	}
 	
-	return "", false
+	members := make([]string, 0, len(set))
+	for member := range set {
+		members = append(members, member)
+	}
+	
+	result := make([]string, count)
+	newSet := make(map[string]bool)
+	for k, v := range set {
+		newSet[k] = v
+	}
+	
+	for i := 0; i < count; i++ {
+		idx := rand.Intn(len(members))
+		result[i] = members[idx]
+		delete(newSet, members[idx])
+		members = append(members[:idx], members[idx+1:]...)
+	}
+	
+	db.data[key] = SetValue(newSet)
+	return result
 }
 
-func (s *Store) SRandMember(key string) (string, bool) {
+func (s *Store) SRandMember(key string, count int) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	s.cleanupExpired(key)
 	db := s.getCurrentDB()
 	
 	value, exists := db.data[key]
-	if !exists || value.Type != SetType || len(value.SetVal) == 0 {
-		return "", false
+	if !exists || value.Type != SetType {
+		return []string{}
 	}
 	
-	// Get a random member without removing it
-	for member := range value.SetVal {
-		return member, true
+	set := value.Set()
+	if count <= 0 || len(set) == 0 {
+		return []string{}
 	}
 	
-	return "", false
+	members := make([]string, 0, len(set))
+	for member := range set {
+		members = append(members, member)
+	}
+	
+	if count >= len(members) {
+		return members
+	}
+	
+	result := make([]string, count)
+	for i := 0; i < count; i++ {
+		result[i] = members[rand.Intn(len(members))]
+	}
+	
+	return result
 }
 
-func (s *Store) SInter(keys []string) []string {
+func (s *Store) SInter(keys ...string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	db := s.getCurrentDB()
 	
 	if len(keys) == 0 {
 		return []string{}
 	}
 	
-	db := s.getCurrentDB()
-	
-	// Start with first set
-	s.cleanupExpired(keys[0])
 	firstValue, exists := db.data[keys[0]]
 	if !exists || firstValue.Type != SetType {
 		return []string{}
 	}
 	
-	// Create result set from first set
 	result := make(map[string]bool)
-	for member := range firstValue.SetVal {
+	for member := range firstValue.Set() {
 		result[member] = true
 	}
 	
-	// Intersect with remaining sets
-	for i := 1; i < len(keys); i++ {
-		s.cleanupExpired(keys[i])
-		value, exists := db.data[keys[i]]
+	for _, key := range keys[1:] {
+		s.cleanupExpired(key)
+		value, exists := db.data[key]
 		if !exists || value.Type != SetType {
-			return []string{} // Empty intersection
+			return []string{}
 		}
 		
-		// Keep only members that exist in this set
+		set := value.Set()
 		for member := range result {
-			if !value.SetVal[member] {
+			if !set[member] {
 				delete(result, member)
 			}
 		}
 		
-		// If result is empty, no point continuing
 		if len(result) == 0 {
 			break
 		}
 	}
 	
-	// Convert to slice
 	members := make([]string, 0, len(result))
 	for member := range result {
 		members = append(members, member)
 	}
+	
 	return members
 }
 
-func (s *Store) SUnion(keys []string) []string {
+func (s *Store) SUnion(keys ...string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
-	if len(keys) == 0 {
-		return []string{}
-	}
-	
 	db := s.getCurrentDB()
+	
 	result := make(map[string]bool)
 	
-	// Union all sets
 	for _, key := range keys {
 		s.cleanupExpired(key)
 		value, exists := db.data[key]
 		if exists && value.Type == SetType {
-			for member := range value.SetVal {
+			for member := range value.Set() {
 				result[member] = true
 			}
 		}
 	}
 	
-	// Convert to slice
 	members := make([]string, 0, len(result))
 	for member := range result {
 		members = append(members, member)
 	}
+	
 	return members
 }
 
-func (s *Store) SDiff(keys []string) []string {
+func (s *Store) SDiff(keys ...string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	db := s.getCurrentDB()
 	
 	if len(keys) == 0 {
 		return []string{}
 	}
 	
-	db := s.getCurrentDB()
-	
-	// Start with first set
-	s.cleanupExpired(keys[0])
 	firstValue, exists := db.data[keys[0]]
 	if !exists || firstValue.Type != SetType {
 		return []string{}
 	}
 	
-	// Create result set from first set
 	result := make(map[string]bool)
-	for member := range firstValue.SetVal {
+	for member := range firstValue.Set() {
 		result[member] = true
 	}
 	
-	// Remove members that exist in other sets
-	for i := 1; i < len(keys); i++ {
-		s.cleanupExpired(keys[i])
-		value, exists := db.data[keys[i]]
+	for _, key := range keys[1:] {
+		s.cleanupExpired(key)
+		value, exists := db.data[key]
 		if exists && value.Type == SetType {
-			for member := range value.SetVal {
+			for member := range value.Set() {
 				delete(result, member)
 			}
 		}
 	}
 	
-	// Convert to slice
 	members := make([]string, 0, len(result))
 	for member := range result {
 		members = append(members, member)
 	}
+	
 	return members
 }
 
-func (s *Store) SInterStore(destination string, keys []string) int {
+func (s *Store) SInterStore(destination string, keys ...string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
-	// Get intersection
-	members := s.SInter(keys)
-	
-	// Store result in destination
 	db := s.getCurrentDB()
-	if len(members) == 0 {
-		// Remove destination key if it exists
-		delete(db.data, destination)
-		delete(db.expiration, destination)
-		return 0
-	}
 	
-	newSet := &RedisValue{
-		Type:   SetType,
-		SetVal: make(map[string]bool),
-	}
-	
+	members := s.SInter(keys...)
+	newSet := make(map[string]bool)
 	for _, member := range members {
-		newSet.SetVal[member] = true
+		newSet[member] = true
 	}
 	
-	db.data[destination] = newSet
-	delete(db.expiration, destination) // Remove any expiration
-	
-	return len(members)
+	db.data[destination] = SetValue(newSet)
+	return len(newSet)
 }
 
-func (s *Store) SUnionStore(destination string, keys []string) int {
+func (s *Store) SUnionStore(destination string, keys ...string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
-	// Get union
-	members := s.SUnion(keys)
-	
-	// Store result in destination
 	db := s.getCurrentDB()
-	if len(members) == 0 {
-		// Remove destination key if it exists
-		delete(db.data, destination)
-		delete(db.expiration, destination)
-		return 0
-	}
 	
-	newSet := &RedisValue{
-		Type:   SetType,
-		SetVal: make(map[string]bool),
-	}
-	
+	members := s.SUnion(keys...)
+	newSet := make(map[string]bool)
 	for _, member := range members {
-		newSet.SetVal[member] = true
+		newSet[member] = true
 	}
 	
-	db.data[destination] = newSet
-	delete(db.expiration, destination) // Remove any expiration
-	
-	return len(members)
+	db.data[destination] = SetValue(newSet)
+	return len(newSet)
 }
 
-func (s *Store) SDiffStore(destination string, keys []string) int {
+func (s *Store) SDiffStore(destination string, keys ...string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
-	// Get difference
-	members := s.SDiff(keys)
-	
-	// Store result in destination
 	db := s.getCurrentDB()
-	if len(members) == 0 {
-		// Remove destination key if it exists
-		delete(db.data, destination)
-		delete(db.expiration, destination)
-		return 0
-	}
 	
-	newSet := &RedisValue{
-		Type:   SetType,
-		SetVal: make(map[string]bool),
-	}
-	
+	members := s.SDiff(keys...)
+	newSet := make(map[string]bool)
 	for _, member := range members {
-		newSet.SetVal[member] = true
+		newSet[member] = true
 	}
 	
-	db.data[destination] = newSet
-	delete(db.expiration, destination) // Remove any expiration
-	
-	return len(members)
+	db.data[destination] = SetValue(newSet)
+	return len(newSet)
 }
 
 func (s *Store) SMove(source, destination, member string) bool {
@@ -366,32 +354,43 @@ func (s *Store) SMove(source, destination, member string) bool {
 	defer s.mu.Unlock()
 	db := s.getCurrentDB()
 	
-	// Check if member exists in source
 	sourceValue, exists := db.data[source]
-	if !exists || sourceValue.Type != SetType || !sourceValue.SetVal[member] {
-		return false // Member doesn't exist in source
+	if !exists || sourceValue.Type != SetType {
+		return false
 	}
 	
-	// Remove from source
-	delete(sourceValue.SetVal, member)
-	if len(sourceValue.SetVal) == 0 {
+	sourceSet := sourceValue.Set()
+	if !sourceSet[member] {
+		return false
+	}
+	
+	newSourceSet := make(map[string]bool)
+	for k, v := range sourceSet {
+		newSourceSet[k] = v
+	}
+	delete(newSourceSet, member)
+	
+	if len(newSourceSet) == 0 {
 		delete(db.data, source)
-		delete(db.expiration, source)
+	} else {
+		db.data[source] = SetValue(newSourceSet)
 	}
 	
-	// Add to destination
-	destValue, exists := db.data[destination]
-	if !exists {
-		destValue = &RedisValue{
-			Type:   SetType,
-			SetVal: make(map[string]bool),
+	destValue, destExists := db.data[destination]
+	var destSet map[string]bool
+	
+	if !destExists || destValue.Type != SetType {
+		destSet = make(map[string]bool)
+	} else {
+		existingDestSet := destValue.Set()
+		destSet = make(map[string]bool)
+		for k, v := range existingDestSet {
+			destSet[k] = v
 		}
-		db.data[destination] = destValue
-	} else if destValue.Type != SetType {
-		// Destination is wrong type, but we already moved from source
-		return true
 	}
 	
-	destValue.SetVal[member] = true
+	destSet[member] = true
+	db.data[destination] = SetValue(destSet)
+	
 	return true
 }

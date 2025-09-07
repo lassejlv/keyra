@@ -126,7 +126,7 @@ func (s *Server) handleHIncrBy(args []string) string {
 		return protocol.EncodeError("value is not an integer or out of range")
 	}
 
-	result, success := s.store.HIncrBy(key, field, increment)
+	result, success := s.store.HIncrBy(key, field, int(increment))
 	if !success {
 		return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
@@ -160,7 +160,16 @@ func (s *Server) handleHMSet(args []string) string {
 	key := args[0]
 	fieldValuePairs := args[1:]
 
-	if s.store.HMSet(key, fieldValuePairs) {
+	if len(fieldValuePairs)%2 != 0 {
+		return protocol.EncodeError("wrong number of arguments for 'hmset' command")
+	}
+
+	fieldMap := make(map[string]string)
+	for i := 0; i < len(fieldValuePairs); i += 2 {
+		fieldMap[fieldValuePairs[i]] = fieldValuePairs[i+1]
+	}
+
+	if s.store.HMSet(key, fieldMap) {
 		return protocol.EncodeSimpleString("OK")
 	}
 	return protocol.EncodeError("WRONGTYPE Operation against a key holding the wrong kind of value")
@@ -173,7 +182,7 @@ func (s *Server) handleHMGet(args []string) string {
 
 	key := args[0]
 	fields := args[1:]
-	values := s.store.HMGet(key, fields)
+	values := s.store.HMGet(key, fields...)
 
 	result := fmt.Sprintf("*%d\r\n", len(values))
 	for _, value := range values {
