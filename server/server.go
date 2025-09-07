@@ -493,6 +493,12 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleHMGet(args)
 	case "HSETNX":
 		return s.handleHSetNX(args)
+	case "HSCAN":
+		return s.handleHScan(args)
+	case "HSTRLEN":
+		return s.handleHStrLen(args)
+	case "HRANDFIELD":
+		return s.handleHRandField(args)
 	
 	// Set commands
 	case "SADD":
