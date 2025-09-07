@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -27,6 +28,78 @@ type Server struct {
 	authenticatedConns sync.Map
 	connPool          *ConnectionPool
 	config            ServerConfig
+	networkStats      *NetworkStats
+}
+
+type NetworkStats struct {
+	totalBytesReceived int64
+	totalBytesSent     int64
+	totalConnections   int64
+	totalCommands      int64
+	lastUpdate         time.Time
+	bytesReceivedRate  float64
+	bytesSentRate      float64
+	commandsRate       float64
+	mu                 sync.RWMutex
+}
+
+func NewNetworkStats() *NetworkStats {
+	return &NetworkStats{
+		lastUpdate: time.Now(),
+	}
+}
+
+func (ns *NetworkStats) AddBytesReceived(bytes int64) {
+	atomic.AddInt64(&ns.totalBytesReceived, bytes)
+}
+
+func (ns *NetworkStats) AddBytesSent(bytes int64) {
+	atomic.AddInt64(&ns.totalBytesSent, bytes)
+}
+
+func (ns *NetworkStats) AddCommand() {
+	atomic.AddInt64(&ns.totalCommands, 1)
+}
+
+func (ns *NetworkStats) AddConnection() {
+	atomic.AddInt64(&ns.totalConnections, 1)
+}
+
+func (ns *NetworkStats) UpdateRates() {
+	ns.mu.Lock()
+	defer ns.mu.Unlock()
+	
+	now := time.Now()
+	duration := now.Sub(ns.lastUpdate).Seconds()
+	
+	if duration > 0 {
+		bytesReceived := atomic.LoadInt64(&ns.totalBytesReceived)
+		bytesSent := atomic.LoadInt64(&ns.totalBytesSent)
+		commands := atomic.LoadInt64(&ns.totalCommands)
+		
+		ns.bytesReceivedRate = float64(bytesReceived) / duration
+		ns.bytesSentRate = float64(bytesSent) / duration
+		ns.commandsRate = float64(commands) / duration
+		
+		atomic.StoreInt64(&ns.totalBytesReceived, 0)
+		atomic.StoreInt64(&ns.totalBytesSent, 0)
+		atomic.StoreInt64(&ns.totalCommands, 0)
+	}
+	
+	ns.lastUpdate = now
+}
+
+func (ns *NetworkStats) GetStats() (int64, int64, int64, int64, float64, float64, float64) {
+	ns.mu.RLock()
+	defer ns.mu.RUnlock()
+	
+	return atomic.LoadInt64(&ns.totalBytesReceived),
+		atomic.LoadInt64(&ns.totalBytesSent),
+		atomic.LoadInt64(&ns.totalConnections),
+		atomic.LoadInt64(&ns.totalCommands),
+		ns.bytesReceivedRate,
+		ns.bytesSentRate,
+		ns.commandsRate
 }
 
 type ServerConfig struct {
@@ -75,6 +148,7 @@ func NewWithConfig(address string, config ServerConfig) *Server {
 		startTime:      time.Now(),
 		password:       password,
 		config:         config,
+		networkStats:   NewNetworkStats(),
 	}
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
@@ -102,6 +176,7 @@ func NewInMemoryWithConfig(address string, config ServerConfig) *Server {
 		startTime:      time.Now(),
 		password:       password,
 		config:         config,
+		networkStats:   NewNetworkStats(),
 	}
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
@@ -126,6 +201,10 @@ func (s *Server) Start() error {
 	if s.saveInterval > 0 {
 		go s.periodicSave()
 	}
+	
+	go s.periodicNetworkStatsUpdate()
+	
+	s.StartMetricsServer(8080)
 
 	go func() {
 		for {
@@ -175,6 +254,20 @@ func (s *Server) periodicSave() {
 	}
 }
 
+func (s *Server) periodicNetworkStatsUpdate() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			s.networkStats.UpdateRates()
+		case <-s.shutdownSignal:
+			return
+		}
+	}
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	s.addClient()
 	connKey := fmt.Sprintf("%p", conn)
@@ -198,6 +291,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		command := strings.ToUpper(args[0])
+		s.networkStats.AddCommand()
 		response := s.executeCommand(command, args[1:], connKey)
 		conn.Write([]byte(response))
 		
@@ -235,6 +329,7 @@ func (s *Server) handlePooledConnection(clientConn *ClientConnection) {
 		}
 
 		command := strings.ToUpper(args[0])
+		s.networkStats.AddCommand()
 		response := s.executeCommand(command, args[1:], connKey)
 		
 		err = clientConn.WriteWithTimeout([]byte(response), s.connPool.writeTimeout)
