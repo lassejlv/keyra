@@ -1,6 +1,6 @@
 # Network I/O Monitoring
 
-Your Redis server now includes comprehensive network I/O monitoring similar to TinyRDM and other Redis GUIs.
+Keyra Redis server now includes comprehensive network I/O monitoring similar to TinyRDM and other Redis GUIs.
 
 ## Features Added
 
