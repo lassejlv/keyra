@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"redis-go-clone/persistence"
-	"redis-go-clone/protocol"
-	"redis-go-clone/store"
+	"keyra/persistence"
+	"keyra/protocol"
+	"keyra/store"
 )
 
 type Server struct {

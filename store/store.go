@@ -1,7 +1,7 @@
 package store
 
 import (
-	"redis-go-clone/persistence"
+	"keyra/persistence"
 	"sync"
 	"time"
 )
