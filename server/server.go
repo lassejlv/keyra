@@ -17,18 +17,24 @@ import (
 )
 
 type Server struct {
-	address           string
-	store             *store.Store
-	saveInterval      time.Duration
-	shutdownSignal    chan os.Signal
-	startTime         time.Time
-	clientCount       int
-	clientMutex       sync.RWMutex
-	password          string
+	address            string
+	store              *store.Store
+	saveInterval       time.Duration
+	shutdownSignal     chan os.Signal
+	startTime          time.Time
+	clientCount        int
+	clientMutex        sync.RWMutex
+	password           string
 	authenticatedConns sync.Map
-	connPool          *ConnectionPool
-	config            ServerConfig
-	networkStats      *NetworkStats
+	transactionContexts sync.Map
+	connPool           *ConnectionPool
+	config             ServerConfig
+	runtimeConfig      *RuntimeConfig
+	networkStats       *NetworkStats
+	monitorConnections map[string]*MonitorConnection
+	monitorMutex       sync.RWMutex
+	slowLog            *SlowLog
+	aof                *persistence.AOF
 }
 
 type NetworkStats struct {
@@ -148,8 +154,12 @@ func NewWithConfig(address string, config ServerConfig) *Server {
 		startTime:      time.Now(),
 		password:       password,
 		config:         config,
+		runtimeConfig:  NewRuntimeConfig(),
 		networkStats:   NewNetworkStats(),
 	}
+	
+	server.initializeMonitoring()
+	server.initializeAOF()
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
 	
@@ -176,8 +186,12 @@ func NewInMemoryWithConfig(address string, config ServerConfig) *Server {
 		startTime:      time.Now(),
 		password:       password,
 		config:         config,
+		runtimeConfig:  NewRuntimeConfig(),
 		networkStats:   NewNetworkStats(),
 	}
+	
+	server.initializeMonitoring()
+	server.initializeAOF()
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
 	
@@ -229,6 +243,14 @@ func (s *Server) Start() error {
 	
 	s.connPool.Close()
 	
+	// Flush and close AOF
+	if s.aof != nil {
+		if err := s.aof.Flush(); err != nil {
+			fmt.Printf("Error flushing AOF: %v\n", err)
+		}
+		s.aof.Close()
+	}
+	
 	if err := s.store.Save(); err != nil {
 		fmt.Printf("Error saving data on shutdown: %v", err)
 	} else {
@@ -275,6 +297,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer func() {
 		s.removeClient()
 		s.authenticatedConns.Delete(connKey)
+		s.transactionContexts.Delete(connKey)
+		s.removeMonitorConnection(connKey)
 		conn.Close()
 	}()
 
@@ -292,7 +316,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 		command := strings.ToUpper(args[0])
 		s.networkStats.AddCommand()
-		response := s.executeCommand(command, args[1:], connKey)
+		
+		// Extract client IP for monitoring
+		clientIP := "127.0.0.1:0"
+		if addr := conn.RemoteAddr(); addr != nil {
+			clientIP = addr.String()
+		}
+		
+		response := s.executeCommandWithTiming(command, args[1:], connKey, clientIP)
 		conn.Write([]byte(response))
 		
 		if command == "QUIT" {
@@ -308,6 +339,8 @@ func (s *Server) handlePooledConnection(clientConn *ClientConnection) {
 	defer func() {
 		s.removeClient()
 		s.authenticatedConns.Delete(connKey)
+		s.transactionContexts.Delete(connKey)
+		s.removeMonitorConnection(connKey)
 		s.connPool.RemoveConnection(connKey)
 		clientConn.conn.Close()
 	}()
@@ -330,7 +363,14 @@ func (s *Server) handlePooledConnection(clientConn *ClientConnection) {
 
 		command := strings.ToUpper(args[0])
 		s.networkStats.AddCommand()
-		response := s.executeCommand(command, args[1:], connKey)
+		
+		// Extract client IP for monitoring
+		clientIP := "127.0.0.1:0"
+		if addr := clientConn.conn.RemoteAddr(); addr != nil {
+			clientIP = addr.String()
+		}
+		
+		response := s.executeCommandWithTiming(command, args[1:], connKey, clientIP)
 		
 		err = clientConn.WriteWithTimeout([]byte(response), s.connPool.writeTimeout)
 		if err != nil {
@@ -397,6 +437,28 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 	// Check authentication for all other commands
 	if !s.isAuthenticated(connKey) {
 		return protocol.EncodeError("NOAUTH Authentication required")
+	}
+	
+	// Handle transaction commands
+	txCtx := s.getTransactionContext(connKey)
+	
+	switch command {
+	case "MULTI":
+		return s.handleMulti(args, connKey)
+	case "EXEC":
+		return s.handleExec(args, connKey)
+	case "DISCARD":
+		return s.handleDiscard(args, connKey)
+	case "WATCH":
+		return s.handleWatch(args, connKey)
+	case "UNWATCH":
+		return s.handleUnwatch(args, connKey)
+	}
+	
+	// If in transaction, queue the command instead of executing it
+	if txCtx.IsInTransaction() {
+		txCtx.QueueCommand(command, args)
+		return protocol.EncodeSimpleString("QUEUED")
 	}
 	
 	switch command {
@@ -573,6 +635,8 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleSave(args)
 	case "BGSAVE":
 		return s.handleBGSave(args)
+	case "BGREWRITEAOF":
+		return s.handleBGRewriteAOF(args)
 	case "DBSIZE":
 		return s.handleDBSize(args)
 	case "FLUSHDB":
@@ -583,6 +647,12 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleInfo(args)
 	case "CLIENT":
 		return s.handleClient(args)
+	case "CONFIG":
+		return s.handleConfig(args)
+	case "MONITOR":
+		return s.handleMonitor(args, connKey, nil)
+	case "SLOWLOG":
+		return s.handleSlowlog(args)
 	
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
