@@ -1,3 +1,5 @@
 redis_data.rdb
 redis-server
 redis-go-clone
+appendonly.aof
+keyra-redis

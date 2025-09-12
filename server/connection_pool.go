@@ -133,6 +133,16 @@ func (cp *ConnectionPool) RemoveConnection(connID string) {
 	}
 }
 
+func (cp *ConnectionPool) GetConnection(connID string) *ClientConnection {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+	
+	if clientConn, exists := cp.connections[connID]; exists {
+		return clientConn
+	}
+	return nil
+}
+
 func (cp *ConnectionPool) UpdateActivity(connID string) {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()

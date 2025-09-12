@@ -166,7 +166,7 @@ func (s *Store) ZAdd(key string, members map[string]float64) int {
 		zset = newZSet()
 		db.data[key] = ZSetValue(zset)
 	} else if value.Type != ZSetType {
-		return 0
+		return -1
 	} else {
 		zset = value.ZSet()
 	}

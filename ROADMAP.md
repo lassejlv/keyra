@@ -49,56 +49,69 @@ This document outlines missing Redis features and planned development priorities
 
 ### Core Data Structure Completion
 
-- [ ] **Sorted Sets (ZSETs)** - The 5th core Redis data structure
-  - [ ] `ZADD`, `ZREM` - Add/remove with scores
-  - [ ] `ZRANGE`, `ZREVRANGE` - Range queries by rank
-  - [ ] `ZRANGEBYSCORE`, `ZREVRANGEBYSCORE` - Range queries by score
-  - [ ] `ZRANK`, `ZREVRANK` - Get member rank
-  - [ ] `ZSCORE`, `ZCOUNT` - Score operations
-  - [ ] `ZINCRBY` - Increment member score
-  - [ ] `ZCARD` - Get sorted set size
+- [x] **Sorted Sets (ZSETs)** - The 5th core Redis data structure
+  - [x] `ZADD`, `ZREM` - Add/remove with scores
+  - [x] `ZRANGE`, `ZREVRANGE` - Range queries by rank
+  - [x] `ZRANGEBYSCORE`, `ZREVRANGEBYSCORE` - Range queries by score
+  - [x] `ZRANK`, `ZREVRANK` - Get member rank
+  - [x] `ZSCORE`, `ZCOUNT` - Score operations
+  - [x] `ZINCRBY` - Increment member score
+  - [x] `ZCARD` - Get sorted set size
 
 ## 🚀 Medium Priority (Advanced Features)
 
 ### Transactions & Atomicity
 
-- [ ] `MULTI`, `EXEC`, `DISCARD` - Transaction support
-- [ ] `WATCH`, `UNWATCH` - Optimistic locking
-- [ ] Transaction queuing and rollback
-- [ ] Error handling within transactions
+- [x] `MULTI`, `EXEC`, `DISCARD` - Transaction support
+- [x] `WATCH`, `UNWATCH` - Optimistic locking
+- [x] Transaction queuing and rollback
+- [x] Error handling within transactions
 
 ### Configuration Management
 
-- [ ] `CONFIG GET`, `CONFIG SET` - Runtime configuration
-- [ ] `CONFIG REWRITE` - Persist config changes
+- [x] `CONFIG GET`, `CONFIG SET` - Runtime configuration
+- [x] `CONFIG REWRITE` - Persist config changes
+- [x] `CONFIG RESETSTAT` - Reset statistics
+- [x] Runtime configuration validation
+- [x] 20+ configurable parameters (memory, timeouts, limits, etc.)
 - [ ] Configuration file support (.conf)
 - [ ] Memory limit enforcement
 - [ ] Configurable save policies
 
 ### Advanced Persistence
 
-- [ ] AOF (Append Only File) persistence
+- [x] AOF (Append Only File) persistence
+- [x] Background AOF rewriting (BGREWRITEAOF)
+- [x] Configurable AOF policies (always, everysec, no)
+- [x] AOF loading on startup
+- [x] Command logging for all data types
 - [ ] RDB compression and optimization
-- [ ] Background AOF rewriting
 - [ ] Configurable persistence policies
 - [ ] Point-in-time recovery
 
 ### Monitoring & Debugging
 
-- [ ] `MONITOR` - Real-time command monitoring
-- [ ] `SLOWLOG` - Slow query logging
+- [x] `MONITOR` - Real-time command monitoring
+- [x] `SLOWLOG` - Slow query logging (GET/RESET/LEN)
+- [x] Performance timing for all commands
+- [x] Configurable slowlog thresholds
+- [x] Client IP tracking in logs
 - [ ] `DEBUG` commands for troubleshooting
 - [ ] Memory usage analysis commands
-- [ ] Performance metrics and statistics
+- [ ] Advanced performance metrics
 
 ## 🔮 Future Enhancements (Advanced Use Cases)
 
 ### Pub/Sub Messaging
 
-- [ ] `PUBLISH`, `SUBSCRIBE`, `UNSUBSCRIBE`
-- [ ] `PSUBSCRIBE` - Pattern-based subscriptions
+- [x] `PUBLISH`, `SUBSCRIBE`, `UNSUBSCRIBE`
+- [x] `PSUBSCRIBE`, `PUNSUBSCRIBE` - Pattern-based subscriptions
+- [x] `PUBSUB CHANNELS`, `PUBSUB NUMSUB`, `PUBSUB NUMPAT`
+- [x] Real-time message delivery
+- [x] Pattern matching for channel subscriptions
+- [x] Subscriber mode handling
+- [x] Connection cleanup and management
 - [ ] Message buffering and delivery guarantees
-- [ ] Client connection state for subscriptions
 
 ### Scripting Support
 

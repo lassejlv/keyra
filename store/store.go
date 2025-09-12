@@ -1,7 +1,7 @@
 package store
 
 import (
-	"redis-go-clone/persistence"
+	"keyra/persistence"
 	"sync"
 	"time"
 )
@@ -190,6 +190,17 @@ func (s *Store) Get(key string) (string, bool) {
 	return value.String(), true
 }
 
+func (s *Store) GetRaw(key string) (*RedisValue, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.isExpired(key) {
+		return nil, false
+	}
+	db := s.getCurrentDB()
+	value, exists := db.data[key]
+	return value, exists
+}
+
 func (s *Store) Del(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -262,6 +273,93 @@ func (s *Store) GetType(key string) DataType {
 		return DataType(-1) // none
 	}
 	return value.Type
+}
+
+func (s *Store) GetCurrentDB() int {
+	return s.GetCurrentDBIndex()
+}
+
+func (s *Store) GetList(key string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	
+	db := s.getCurrentDB()
+	value, exists := db.data[key]
+	if !exists || value.Type != ListType {
+		return nil
+	}
+	
+	list := value.List()
+	result := make([]string, len(list))
+	copy(result, list)
+	return result
+}
+
+func (s *Store) GetSet(key string) map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	
+	db := s.getCurrentDB()
+	value, exists := db.data[key]
+	if !exists || value.Type != SetType {
+		return nil
+	}
+	
+	set := value.Set()
+	result := make(map[string]bool)
+	for k, v := range set {
+		result[k] = v
+	}
+	return result
+}
+
+func (s *Store) GetHash(key string) map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	
+	db := s.getCurrentDB()
+	value, exists := db.data[key]
+	if !exists || value.Type != HashType {
+		return nil
+	}
+	
+	hash := value.Hash()
+	result := make(map[string]string)
+	for k, v := range hash {
+		result[k] = v
+	}
+	return result
+}
+
+func (s *Store) GetZSet(key string) *ZSet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.cleanupExpired(key)
+	
+	db := s.getCurrentDB()
+	value, exists := db.data[key]
+	if !exists || value.Type != ZSetType {
+		return nil
+	}
+	
+	return value.ZSet()
+}
+
+func (s *Store) GetTTL(key string) time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	db := s.getCurrentDB()
+	if expTime, exists := db.expiration[key]; exists {
+		remaining := time.Until(expTime)
+		if remaining > 0 {
+			return remaining
+		}
+	}
+	return -1
 }
 
 func (s *Store) Save() error {

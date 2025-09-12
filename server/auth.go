@@ -1,7 +1,7 @@
 package server
 
 import (
-	"redis-go-clone/protocol"
+	"keyra/protocol"
 )
 
 func (s *Server) handleAuth(args []string, connKey string) string {
