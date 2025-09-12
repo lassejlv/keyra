@@ -312,6 +312,18 @@ func (s *Server) executeCommandWithoutAOF(command string, args []string, connKey
 		return s.handleMonitor(args, connKey, nil)
 	case "SLOWLOG":
 		return s.handleSlowlog(args)
+	case "PUBLISH":
+		return s.handlePublish(args)
+	case "SUBSCRIBE":
+		return s.handleSubscribe(args, connKey, nil)
+	case "UNSUBSCRIBE":
+		return s.handleUnsubscribe(args, connKey)
+	case "PSUBSCRIBE":
+		return s.handlePSubscribe(args, connKey, nil)
+	case "PUNSUBSCRIBE":
+		return s.handlePUnsubscribe(args, connKey)
+	case "PUBSUB":
+		return s.handlePubSub(args)
 	
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))

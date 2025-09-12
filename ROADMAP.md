@@ -104,10 +104,14 @@ This document outlines missing Redis features and planned development priorities
 
 ### Pub/Sub Messaging
 
-- [ ] `PUBLISH`, `SUBSCRIBE`, `UNSUBSCRIBE`
-- [ ] `PSUBSCRIBE` - Pattern-based subscriptions
+- [x] `PUBLISH`, `SUBSCRIBE`, `UNSUBSCRIBE`
+- [x] `PSUBSCRIBE`, `PUNSUBSCRIBE` - Pattern-based subscriptions
+- [x] `PUBSUB CHANNELS`, `PUBSUB NUMSUB`, `PUBSUB NUMPAT`
+- [x] Real-time message delivery
+- [x] Pattern matching for channel subscriptions
+- [x] Subscriber mode handling
+- [x] Connection cleanup and management
 - [ ] Message buffering and delivery guarantees
-- [ ] Client connection state for subscriptions
 
 ### Scripting Support
 

@@ -35,6 +35,7 @@ type Server struct {
 	monitorMutex       sync.RWMutex
 	slowLog            *SlowLog
 	aof                *persistence.AOF
+	pubsub             *PubSubSystem
 }
 
 type NetworkStats struct {
@@ -160,6 +161,7 @@ func NewWithConfig(address string, config ServerConfig) *Server {
 	
 	server.initializeMonitoring()
 	server.initializeAOF()
+	server.pubsub = NewPubSubSystem()
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
 	
@@ -192,6 +194,7 @@ func NewInMemoryWithConfig(address string, config ServerConfig) *Server {
 	
 	server.initializeMonitoring()
 	server.initializeAOF()
+	server.pubsub = NewPubSubSystem()
 	
 	server.connPool = NewConnectionPool(server, config.ConnectionConfig)
 	
@@ -299,6 +302,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		s.authenticatedConns.Delete(connKey)
 		s.transactionContexts.Delete(connKey)
 		s.removeMonitorConnection(connKey)
+		s.pubsub.RemoveSubscriber(connKey)
 		conn.Close()
 	}()
 
@@ -341,6 +345,7 @@ func (s *Server) handlePooledConnection(clientConn *ClientConnection) {
 		s.authenticatedConns.Delete(connKey)
 		s.transactionContexts.Delete(connKey)
 		s.removeMonitorConnection(connKey)
+		s.pubsub.RemoveSubscriber(connKey)
 		s.connPool.RemoveConnection(connKey)
 		clientConn.conn.Close()
 	}()
@@ -437,6 +442,27 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 	// Check authentication for all other commands
 	if !s.isAuthenticated(connKey) {
 		return protocol.EncodeError("NOAUTH Authentication required")
+	}
+	
+	// Check if connection is in subscriber mode
+	if s.isSubscriberConnection(connKey) {
+		return s.handleSubscriberCommand(command, args, connKey, nil)
+	}
+	
+	// Handle Pub/Sub commands first
+	switch command {
+	case "PUBLISH":
+		return s.handlePublish(args)
+	case "SUBSCRIBE":
+		return s.handleSubscribe(args, connKey, nil)
+	case "UNSUBSCRIBE":
+		return s.handleUnsubscribe(args, connKey)
+	case "PSUBSCRIBE":
+		return s.handlePSubscribe(args, connKey, nil)
+	case "PUNSUBSCRIBE":
+		return s.handlePUnsubscribe(args, connKey)
+	case "PUBSUB":
+		return s.handlePubSub(args)
 	}
 	
 	// Handle transaction commands

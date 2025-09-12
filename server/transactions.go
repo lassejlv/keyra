@@ -395,6 +395,10 @@ func (s *Server) executeCommandWithoutTransactionCheck(command string, args []st
 		return s.handleMonitor(args, connKey, nil)
 	case "SLOWLOG":
 		return s.handleSlowlog(args)
+	case "PUBLISH":
+		return s.handlePublish(args)
+	case "PUBSUB":
+		return s.handlePubSub(args)
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}
