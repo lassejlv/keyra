@@ -1,0 +1,1 @@
+REDIS_PASSWORD=bob123 ./keyra-redis
