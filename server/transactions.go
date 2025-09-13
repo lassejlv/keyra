@@ -147,22 +147,13 @@ func (s *Server) handleExec(args []string, connKey string) string {
 	defer txCtx.ClearTransaction()
 	defer txCtx.ClearWatchedKeys()
 	
-	// Temporarily disable watch check for debugging
-	// if !txCtx.CheckWatchedKeys(s) {
-	//	return protocol.EncodeBulkString("")
-	// }
 	
 	commands := txCtx.GetQueuedCommands()
 	results := make([]string, len(commands))
 	
 	for i, cmd := range commands {
-		// Test with hardcoded SET command
-		if cmd.Command == "SET" && len(cmd.Args) >= 2 {
-			s.store.Set(cmd.Args[0], cmd.Args[1])
-			results[i] = protocol.EncodeSimpleString("OK")
-		} else {
-			results[i] = protocol.EncodeError("unsupported command in transaction")
-		}
+		result := s.executeCommandWithoutTransactionCheck(cmd.Command, cmd.Args, connKey)
+		results[i] = result
 	}
 	
 	response := fmt.Sprintf("*%d\r\n", len(results))

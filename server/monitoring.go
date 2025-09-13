@@ -319,20 +319,20 @@ func (s *Server) handleSlowlogLen(args []string) string {
 func (s *Server) executeCommandWithTiming(command string, args []string, connKey string, clientIP string) string {
 	start := time.Now()
 	
-	// Build full command for monitoring and slowlog
 	fullCommand := make([]string, len(args)+1)
 	fullCommand[0] = command
 	copy(fullCommand[1:], args)
 
-	// Execute the command with AOF logging
-	result := s.executeCommandWithAOF(command, args, connKey)
+	result := s.executeCommand(command, args, connKey)
+	
+	if !strings.HasPrefix(result, "-ERR") {
+		s.logCommandToAOF(command, args)
+	}
 	
 	duration := time.Since(start)
 
-	// Broadcast to monitors
 	s.broadcastToMonitors(start, fullCommand, clientIP)
 
-	// Add to slowlog if enabled
 	slowlogThreshold, _ := s.runtimeConfig.Get("slowlog-log-slower-than")
 	if thresholdMicros, err := strconv.Atoi(slowlogThreshold.Value); err == nil && thresholdMicros >= 0 {
 		threshold := time.Duration(thresholdMicros) * time.Microsecond

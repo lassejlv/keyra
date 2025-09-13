@@ -222,6 +222,7 @@ func (s *Server) Start() error {
 	go s.periodicNetworkStatsUpdate()
 	
 	s.StartMetricsServer(8080)
+	s.StartHTTPServer(8081)
 
 	go func() {
 		for {
@@ -437,6 +438,8 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleAuth(args, connKey)
 	case "PING":
 		return s.handlePing(args)
+	case "HELLO":
+		return s.handleHello(args)
 	}
 	
 	// Check authentication for all other commands
