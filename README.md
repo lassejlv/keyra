@@ -8,6 +8,7 @@ A lightweight, Redis-compatible server written in Go.
 </div>
 
 > [!WARNING]
+> THIS PROJECT IS PAUSED FOR NOW
 > This is a work in progress, it is not ready for production use yet.
 
 ## Running
