@@ -15,14 +15,55 @@ func (s *Server) handleQuit(args []string) string {
 	return protocol.EncodeSimpleString("OK")
 }
 
-func (s *Server) handleHello(args []string) string {
+func (s *Server) handleHello(args []string, connKey string) string {
 	// Default to RESP2 if no version specified
 	protocolVersion := 2
 	
+	// Parse arguments: HELLO [protover [AUTH username password] [SETNAME clientname]]
+	i := 0
 	if len(args) > 0 {
 		if version, err := strconv.Atoi(args[0]); err == nil && (version == 2 || version == 3) {
 			protocolVersion = version
+			i++
 		}
+	}
+	
+	// Process optional arguments
+	for i < len(args) {
+		arg := strings.ToUpper(args[i])
+		switch arg {
+		case "AUTH":
+			// AUTH username password
+			if i+2 >= len(args) {
+				return protocol.EncodeError("ERR wrong number of arguments for 'HELLO' command")
+			}
+			// username := args[i+1] // Ignored for now, only password auth supported
+			password := args[i+2]
+			
+			if !s.requiresAuth() {
+				return protocol.EncodeError("ERR Client sent AUTH, but no password is set")
+			}
+			
+			if password != s.password {
+				return protocol.EncodeError("WRONGPASS invalid username-password pair or user is disabled.")
+			}
+			
+			s.authenticate(connKey)
+			i += 3
+		case "SETNAME":
+			// SETNAME clientname - just skip for now
+			if i+1 >= len(args) {
+				return protocol.EncodeError("ERR wrong number of arguments for 'HELLO' command")
+			}
+			i += 2
+		default:
+			return protocol.EncodeError("ERR unknown option '" + args[i] + "'")
+		}
+	}
+	
+	// If password is required and not authenticated, return error
+	if s.requiresAuth() && !s.isAuthenticated(connKey) {
+		return protocol.EncodeError("NOAUTH HELLO must be called with the client already authenticated, or with AUTH <user> <password>")
 	}
 	
 	if protocolVersion == 3 {
@@ -49,8 +90,30 @@ func (s *Server) handleHello(args []string) string {
 		return info.String()
 	}
 	
-	// RESP2 response - return simple OK
-	return protocol.EncodeSimpleString("OK")
+	// RESP2 response - return array with server info
+	var info strings.Builder
+	version := "unknown"
+	if versionBytes, err := os.ReadFile(".version"); err == nil {
+		version = strings.Replace(strings.TrimSpace(string(versionBytes)), "v", "", 1)
+	}
+	
+	info.WriteString("*14\r\n")
+	info.WriteString("$6\r\nserver\r\n")
+	info.WriteString("$5\r\nredis\r\n")
+	info.WriteString("$7\r\nversion\r\n")
+	info.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(version), version))
+	info.WriteString("$5\r\nproto\r\n")
+	info.WriteString(":2\r\n")
+	info.WriteString("$2\r\nid\r\n")
+	info.WriteString(":1\r\n")
+	info.WriteString("$4\r\nmode\r\n")
+	info.WriteString("$10\r\nstandalone\r\n")
+	info.WriteString("$4\r\nrole\r\n")
+	info.WriteString("$6\r\nmaster\r\n")
+	info.WriteString("$7\r\nmodules\r\n")
+	info.WriteString("*0\r\n")
+	
+	return info.String()
 }
 
 func (s *Server) handleSave(args []string) string {

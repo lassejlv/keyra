@@ -6,7 +6,7 @@ import (
 
 func (s *Server) handleAuth(args []string, connKey string) string {
 	if len(args) < 1 || len(args) > 2 {
-		return protocol.EncodeError("wrong number of arguments for 'auth' command")
+		return protocol.EncodeError("ERR wrong number of arguments for 'auth' command")
 	}
 
 	if !s.requiresAuth() {
@@ -19,9 +19,13 @@ func (s *Server) handleAuth(args []string, connKey string) string {
 	// and legacy format (AUTH <password>)
 	if len(args) == 2 {
 		// Redis 6.0+ format: AUTH <username> <password>
-		// For now, we ignore the username since we only support single password auth
-		// username := args[0]
+		username := args[0]
 		providedPassword = args[1]
+		
+		// Only "default" user is supported for now
+		if username != "default" && username != "" {
+			return protocol.EncodeError("WRONGPASS invalid username-password pair or user is disabled.")
+		}
 	} else {
 		// Legacy format: AUTH <password>
 		providedPassword = args[0]
@@ -32,7 +36,7 @@ func (s *Server) handleAuth(args []string, connKey string) string {
 		return protocol.EncodeSimpleString("OK")
 	}
 
-	return protocol.EncodeError("ERR invalid password")
+	return protocol.EncodeError("WRONGPASS invalid username-password pair or user is disabled.")
 }
 
 func (s *Server) handlePing(args []string) string {

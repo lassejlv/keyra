@@ -7,14 +7,62 @@ import (
 	"time"
 )
 
-type DataSnapshot struct {
-	Data       map[string]string
+// DataType mirrors store.DataType for persistence
+type DataType int
+
+const (
+	StringType DataType = iota
+	ListType
+	HashType
+	SetType
+	ZSetType
+)
+
+// ZSetMember mirrors store.ZSetMember for persistence
+type ZSetMember struct {
+	Member string
+	Score  float64
+}
+
+// ZSetData holds serializable ZSet data
+type ZSetData struct {
+	Members map[string]float64
+	Sorted  []ZSetMember
+}
+
+// SerializedValue represents a serializable version of RedisValue
+type SerializedValue struct {
+	Type         DataType
+	StringValue  string
+	ListValue    []string
+	HashValue    map[string]string
+	SetValue     map[string]bool
+	ZSetValue    *ZSetData
+}
+
+// DatabaseSnapshot represents a single database's state
+type DatabaseSnapshot struct {
+	Data       map[string]SerializedValue
 	Expiration map[string]time.Time
-	Timestamp  time.Time
+}
+
+// DataSnapshot represents the full state of all databases
+type DataSnapshot struct {
+	Databases [16]DatabaseSnapshot
+	Timestamp time.Time
 }
 
 type Persistence struct {
 	filename string
+}
+
+func init() {
+	// Register types for gob encoding
+	gob.Register(SerializedValue{})
+	gob.Register(ZSetData{})
+	gob.Register(ZSetMember{})
+	gob.Register(DatabaseSnapshot{})
+	gob.Register(DataSnapshot{})
 }
 
 func New(filename string) *Persistence {
@@ -36,11 +84,10 @@ func GetStoragePath() string {
 	return "redis_data.rdb"
 }
 
-func (p *Persistence) Save(data map[string]string, expiration map[string]time.Time) error {
+func (p *Persistence) SaveDatabases(databases [16]DatabaseSnapshot) error {
 	snapshot := DataSnapshot{
-		Data:       data,
-		Expiration: expiration,
-		Timestamp:  time.Now(),
+		Databases: databases,
+		Timestamp: time.Now(),
 	}
 
 	file, err := os.Create(p.filename)
@@ -53,13 +100,23 @@ func (p *Persistence) Save(data map[string]string, expiration map[string]time.Ti
 	return encoder.Encode(snapshot)
 }
 
-func (p *Persistence) Load() (map[string]string, map[string]time.Time, error) {
+func (p *Persistence) LoadDatabases() ([16]DatabaseSnapshot, error) {
+	var databases [16]DatabaseSnapshot
+	
+	// Initialize empty databases
+	for i := 0; i < 16; i++ {
+		databases[i] = DatabaseSnapshot{
+			Data:       make(map[string]SerializedValue),
+			Expiration: make(map[string]time.Time),
+		}
+	}
+
 	file, err := os.Open(p.filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(map[string]string), make(map[string]time.Time), nil
+			return databases, nil
 		}
-		return nil, nil, err
+		return databases, err
 	}
 	defer file.Close()
 
@@ -67,24 +124,69 @@ func (p *Persistence) Load() (map[string]string, map[string]time.Time, error) {
 	decoder := gob.NewDecoder(file)
 	err = decoder.Decode(&snapshot)
 	if err != nil {
-		return nil, nil, err
+		return databases, err
 	}
 
-	data := make(map[string]string)
-	expiration := make(map[string]time.Time)
 	now := time.Now()
 
-	for key, value := range snapshot.Data {
-		if expTime, hasExpiration := snapshot.Expiration[key]; hasExpiration {
-			if now.After(expTime) {
-				continue
-			}
-			expiration[key] = expTime
+	// Filter out expired keys
+	for dbIdx := 0; dbIdx < 16; dbIdx++ {
+		dbSnapshot := snapshot.Databases[dbIdx]
+		if dbSnapshot.Data == nil {
+			continue
 		}
-		data[key] = value
+		
+		for key, value := range dbSnapshot.Data {
+			if expTime, hasExpiration := dbSnapshot.Expiration[key]; hasExpiration {
+				if now.After(expTime) {
+					continue // Skip expired keys
+				}
+				databases[dbIdx].Expiration[key] = expTime
+			}
+			databases[dbIdx].Data[key] = value
+		}
 	}
 
-	return data, expiration, nil
+	return databases, nil
+}
+
+// Legacy methods for backward compatibility
+func (p *Persistence) Save(data map[string]string, expiration map[string]time.Time) error {
+	var databases [16]DatabaseSnapshot
+	for i := 0; i < 16; i++ {
+		databases[i] = DatabaseSnapshot{
+			Data:       make(map[string]SerializedValue),
+			Expiration: make(map[string]time.Time),
+		}
+	}
+	
+	// Convert string-only data to new format in database 0
+	for k, v := range data {
+		databases[0].Data[k] = SerializedValue{
+			Type:        StringType,
+			StringValue: v,
+		}
+	}
+	databases[0].Expiration = expiration
+	
+	return p.SaveDatabases(databases)
+}
+
+func (p *Persistence) Load() (map[string]string, map[string]time.Time, error) {
+	databases, err := p.LoadDatabases()
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	// Convert back to string-only format from database 0
+	data := make(map[string]string)
+	for k, v := range databases[0].Data {
+		if v.Type == StringType {
+			data[k] = v.StringValue
+		}
+	}
+	
+	return data, databases[0].Expiration, nil
 }
 
 func (p *Persistence) Exists() bool {

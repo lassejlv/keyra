@@ -432,19 +432,19 @@ func (s *Server) authenticate(connKey string) {
 }
 
 func (s *Server) executeCommand(command string, args []string, connKey string) string {
-	// Commands that don't require authentication
-	switch command {
-	case "AUTH":
+	// AUTH command is always allowed
+	if command == "AUTH" {
 		return s.handleAuth(args, connKey)
-	case "PING":
-		return s.handlePing(args)
-	case "HELLO":
-		return s.handleHello(args)
 	}
 	
-	// Check authentication for all other commands
+	// HELLO command with optional AUTH support
+	if command == "HELLO" {
+		return s.handleHello(args, connKey)
+	}
+	
+	// Check authentication for all other commands (including PING)
 	if !s.isAuthenticated(connKey) {
-		return protocol.EncodeError("NOAUTH Authentication required")
+		return protocol.EncodeError("NOAUTH Authentication required.")
 	}
 	
 	// Check if connection is in subscriber mode
@@ -657,7 +657,7 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 	
 	// Server administration commands
 	case "HELLO":
-		return s.handleHello(args)
+		return s.handleHello(args, connKey)
 	case "QUIT":
 		return s.handleQuit(args)
 	case "SAVE":

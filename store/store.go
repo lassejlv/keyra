@@ -369,24 +369,69 @@ func (s *Store) Save() error {
 		return nil
 	}
 	
-	// For now, only save database 0 for backward compatibility
-	// TODO: Support multi-database persistence
-	db := s.databases[0]
+	var databases [16]persistence.DatabaseSnapshot
 	
-	dataCopy := make(map[string]string)
-	for k, v := range db.data {
-		if v.Type == StringType {
-			dataCopy[k] = v.String()
+	for dbIdx := 0; dbIdx < 16; dbIdx++ {
+		db := s.databases[dbIdx]
+		databases[dbIdx] = persistence.DatabaseSnapshot{
+			Data:       make(map[string]persistence.SerializedValue),
+			Expiration: make(map[string]time.Time),
 		}
-		// TODO: Serialize other data types
+		
+		for k, v := range db.data {
+			sv := persistence.SerializedValue{
+				Type: persistence.DataType(v.Type),
+			}
+			
+			switch v.Type {
+			case StringType:
+				sv.StringValue = v.String()
+			case ListType:
+				// Make a copy of the list
+				list := v.List()
+				sv.ListValue = make([]string, len(list))
+				copy(sv.ListValue, list)
+			case HashType:
+				// Make a copy of the hash
+				hash := v.Hash()
+				sv.HashValue = make(map[string]string)
+				for hk, hv := range hash {
+					sv.HashValue[hk] = hv
+				}
+			case SetType:
+				// Make a copy of the set
+				set := v.Set()
+				sv.SetValue = make(map[string]bool)
+				for sk, sval := range set {
+					sv.SetValue[sk] = sval
+				}
+			case ZSetType:
+				// Make a copy of the zset
+				zset := v.ZSet()
+				sv.ZSetValue = &persistence.ZSetData{
+					Members: make(map[string]float64),
+					Sorted:  make([]persistence.ZSetMember, len(zset.Sorted)),
+				}
+				for mk, mv := range zset.Members {
+					sv.ZSetValue.Members[mk] = mv
+				}
+				for i, m := range zset.Sorted {
+					sv.ZSetValue.Sorted[i] = persistence.ZSetMember{
+						Member: m.Member,
+						Score:  m.Score,
+					}
+				}
+			}
+			
+			databases[dbIdx].Data[k] = sv
+		}
+		
+		for k, v := range db.expiration {
+			databases[dbIdx].Expiration[k] = v
+		}
 	}
 	
-	expCopy := make(map[string]time.Time)
-	for k, v := range db.expiration {
-		expCopy[k] = v
-	}
-	
-	return s.persistence.Save(dataCopy, expCopy)
+	return s.persistence.SaveDatabases(databases)
 }
 
 func (s *Store) Load() error {
@@ -394,7 +439,7 @@ func (s *Store) Load() error {
 		return nil
 	}
 	
-	data, expiration, err := s.persistence.Load()
+	databases, err := s.persistence.LoadDatabases()
 	if err != nil {
 		return err
 	}
@@ -402,14 +447,55 @@ func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	
-	// Load into database 0 for backward compatibility
-	db := s.databases[0]
-	
-	// Convert string data to RedisValue format
-	for k, v := range data {
-		db.data[k] = StringValue(v)
+	for dbIdx := 0; dbIdx < 16; dbIdx++ {
+		dbSnapshot := databases[dbIdx]
+		db := s.databases[dbIdx]
+		
+		for k, sv := range dbSnapshot.Data {
+			switch persistence.DataType(sv.Type) {
+			case persistence.StringType:
+				db.data[k] = StringValue(sv.StringValue)
+			case persistence.ListType:
+				// Make a copy of the list
+				list := make([]string, len(sv.ListValue))
+				copy(list, sv.ListValue)
+				db.data[k] = ListValue(list)
+			case persistence.HashType:
+				// Make a copy of the hash
+				hash := make(map[string]string)
+				for hk, hv := range sv.HashValue {
+					hash[hk] = hv
+				}
+				db.data[k] = HashValue(hash)
+			case persistence.SetType:
+				// Make a copy of the set
+				set := make(map[string]bool)
+				for sk, sval := range sv.SetValue {
+					set[sk] = sval
+				}
+				db.data[k] = SetValue(set)
+			case persistence.ZSetType:
+				if sv.ZSetValue != nil {
+					zset := &ZSet{
+						Members: make(map[string]float64),
+						Sorted:  make([]ZSetMember, len(sv.ZSetValue.Sorted)),
+					}
+					for mk, mv := range sv.ZSetValue.Members {
+						zset.Members[mk] = mv
+					}
+					for i, m := range sv.ZSetValue.Sorted {
+						zset.Sorted[i] = ZSetMember{
+							Member: m.Member,
+							Score:  m.Score,
+						}
+					}
+					db.data[k] = ZSetValue(zset)
+				}
+			}
+		}
+		
+		db.expiration = dbSnapshot.Expiration
 	}
 	
-	db.expiration = expiration
 	return nil
 }

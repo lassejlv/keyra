@@ -287,7 +287,7 @@ func (s *Server) executeCommandWithoutAOF(command string, args []string, connKey
 	
 	// Server administration commands
 	case "HELLO":
-		return s.handleHello(args)
+		return s.handleHello(args, connKey)
 	case "QUIT":
 		return s.handleQuit(args)
 	case "SAVE":

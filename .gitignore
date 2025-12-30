@@ -3,3 +3,4 @@ redis-server
 redis-go-clone
 appendonly.aof
 keyra-redis
+*.exe
