@@ -656,6 +656,8 @@ func (s *Server) executeCommand(command string, args []string, connKey string) s
 		return s.handleSwapDB(args)
 	
 	// Server administration commands
+	case "PING":
+		return s.handlePing(args)
 	case "HELLO":
 		return s.handleHello(args, connKey)
 	case "QUIT":

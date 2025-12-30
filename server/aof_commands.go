@@ -286,6 +286,8 @@ func (s *Server) executeCommandWithoutAOF(command string, args []string, connKey
 		return s.handleSwapDB(args)
 	
 	// Server administration commands
+	case "PING":
+		return s.handlePing(args)
 	case "HELLO":
 		return s.handleHello(args, connKey)
 	case "QUIT":
