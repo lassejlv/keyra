@@ -16,6 +16,7 @@ const (
 	HashType
 	SetType
 	ZSetType
+	JSONType
 )
 
 // ZSetMember mirrors store.ZSetMember for persistence
@@ -38,6 +39,7 @@ type SerializedValue struct {
 	HashValue    map[string]string
 	SetValue     map[string]bool
 	ZSetValue    *ZSetData
+	JSONValue    []byte // JSON stored as raw bytes
 }
 
 // DatabaseSnapshot represents a single database's state

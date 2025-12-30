@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"keyra/persistence"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ const (
 	HashType
 	SetType
 	ZSetType
+	JSONType
 )
 
 func (dt DataType) String() string {
@@ -28,6 +30,8 @@ func (dt DataType) String() string {
 		return "set"
 	case ZSetType:
 		return "zset"
+	case JSONType:
+		return "ReJSON-RL"
 	default:
 		return "none"
 	}
@@ -63,6 +67,10 @@ func ZSetValue(zs *ZSet) *RedisValue {
 	return &RedisValue{Type: ZSetType, Value: zs}
 }
 
+func JSONValue(j interface{}) *RedisValue {
+	return &RedisValue{Type: JSONType, Value: j}
+}
+
 func (rv *RedisValue) String() string {
 	if rv.Type != StringType {
 		panic("value is not a string")
@@ -96,6 +104,13 @@ func (rv *RedisValue) ZSet() *ZSet {
 		panic("value is not a zset")
 	}
 	return rv.Value.(*ZSet)
+}
+
+func (rv *RedisValue) JSON() interface{} {
+	if rv.Type != JSONType {
+		panic("value is not JSON")
+	}
+	return rv.Value
 }
 
 type ZSet struct {
@@ -421,6 +436,12 @@ func (s *Store) Save() error {
 						Score:  m.Score,
 					}
 				}
+			case JSONType:
+				// Serialize JSON value to bytes
+				jsonBytes, err := json.Marshal(v.JSON())
+				if err == nil {
+					sv.JSONValue = jsonBytes
+				}
 			}
 			
 			databases[dbIdx].Data[k] = sv
@@ -490,6 +511,13 @@ func (s *Store) Load() error {
 						}
 					}
 					db.data[k] = ZSetValue(zset)
+				}
+			case persistence.JSONType:
+				if sv.JSONValue != nil {
+					var jsonData interface{}
+					if err := json.Unmarshal(sv.JSONValue, &jsonData); err == nil {
+						db.data[k] = JSONValue(jsonData)
+					}
 				}
 			}
 		}

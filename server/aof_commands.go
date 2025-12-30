@@ -327,6 +327,46 @@ func (s *Server) executeCommandWithoutAOF(command string, args []string, connKey
 	case "PUBSUB":
 		return s.handlePubSub(args)
 	
+	// JSON commands (RedisJSON compatible)
+	case "JSON.SET":
+		return s.handleJSONSet(args)
+	case "JSON.GET":
+		return s.handleJSONGet(args)
+	case "JSON.DEL":
+		return s.handleJSONDel(args)
+	case "JSON.FORGET":
+		return s.handleJSONForget(args)
+	case "JSON.TYPE":
+		return s.handleJSONType(args)
+	case "JSON.NUMINCRBY":
+		return s.handleJSONNumIncrBy(args)
+	case "JSON.NUMMULTBY":
+		return s.handleJSONNumMultBy(args)
+	case "JSON.STRAPPEND":
+		return s.handleJSONStrAppend(args)
+	case "JSON.STRLEN":
+		return s.handleJSONStrLen(args)
+	case "JSON.ARRAPPEND":
+		return s.handleJSONArrAppend(args)
+	case "JSON.ARRLEN":
+		return s.handleJSONArrLen(args)
+	case "JSON.ARRPOP":
+		return s.handleJSONArrPop(args)
+	case "JSON.ARRINDEX":
+		return s.handleJSONArrIndex(args)
+	case "JSON.ARRINSERT":
+		return s.handleJSONArrInsert(args)
+	case "JSON.ARRTRIM":
+		return s.handleJSONArrTrim(args)
+	case "JSON.OBJKEYS":
+		return s.handleJSONObjKeys(args)
+	case "JSON.OBJLEN":
+		return s.handleJSONObjLen(args)
+	case "JSON.MGET":
+		return s.handleJSONMGet(args)
+	case "JSON.RESP":
+		return s.handleJSONResp(args)
+	
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}

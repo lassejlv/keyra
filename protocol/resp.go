@@ -146,5 +146,24 @@ func EncodeInteger(i int) string {
 }
 
 func EncodeError(msg string) string {
+	if strings.HasPrefix(msg, "ERR ") || strings.HasPrefix(msg, "WRONGPASS") || strings.HasPrefix(msg, "NOAUTH") {
+		return fmt.Sprintf("-%s\r\n", msg)
+	}
 	return fmt.Sprintf("-ERR %s\r\n", msg)
+}
+
+func EncodeNull() string {
+	return "$-1\r\n"
+}
+
+func EncodeStringArray(arr []string) string {
+	if arr == nil {
+		return "*-1\r\n"
+	}
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("*%d\r\n", len(arr)))
+	for _, s := range arr {
+		result.WriteString(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
+	}
+	return result.String()
 }

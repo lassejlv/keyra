@@ -358,6 +358,17 @@ func (aof *AOF) ShouldLogCommand(command string) bool {
 		"MOVE":      true,
 		"SWAPDB":    true,
 		"SELECT":    true,
+		// JSON commands
+		"JSON.SET":       true,
+		"JSON.DEL":       true,
+		"JSON.FORGET":    true,
+		"JSON.NUMINCRBY": true,
+		"JSON.NUMMULTBY": true,
+		"JSON.STRAPPEND": true,
+		"JSON.ARRAPPEND": true,
+		"JSON.ARRPOP":    true,
+		"JSON.ARRINSERT": true,
+		"JSON.ARRTRIM":   true,
 	}
 	
 	return writeCommands[strings.ToUpper(command)]
