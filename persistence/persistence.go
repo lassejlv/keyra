@@ -17,6 +17,7 @@ const (
 	SetType
 	ZSetType
 	JSONType
+	StreamType
 )
 
 // ZSetMember mirrors store.ZSetMember for persistence
@@ -31,6 +32,19 @@ type ZSetData struct {
 	Sorted  []ZSetMember
 }
 
+// StreamEntry for persistence
+type StreamEntry struct {
+	ID     string
+	Fields map[string]string
+}
+
+// StreamData holds serializable Stream data
+type StreamData struct {
+	Entries []StreamEntry
+	LastID  string
+	FirstID string
+}
+
 // SerializedValue represents a serializable version of RedisValue
 type SerializedValue struct {
 	Type         DataType
@@ -40,6 +54,7 @@ type SerializedValue struct {
 	SetValue     map[string]bool
 	ZSetValue    *ZSetData
 	JSONValue    []byte // JSON stored as raw bytes
+	StreamValue  *StreamData
 }
 
 // DatabaseSnapshot represents a single database's state
@@ -65,6 +80,8 @@ func init() {
 	gob.Register(ZSetMember{})
 	gob.Register(DatabaseSnapshot{})
 	gob.Register(DataSnapshot{})
+	gob.Register(StreamData{})
+	gob.Register(StreamEntry{})
 }
 
 func New(filename string) *Persistence {

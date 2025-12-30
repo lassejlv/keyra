@@ -367,6 +367,26 @@ func (s *Server) executeCommandWithoutAOF(command string, args []string, connKey
 	case "JSON.RESP":
 		return s.handleJSONResp(args)
 	
+	// Stream commands
+	case "XADD":
+		return s.handleXAdd(args)
+	case "XLEN":
+		return s.handleXLen(args)
+	case "XRANGE":
+		return s.handleXRange(args)
+	case "XREVRANGE":
+		return s.handleXRevRange(args)
+	case "XREAD":
+		return s.handleXRead(args)
+	case "XTRIM":
+		return s.handleXTrim(args)
+	case "XDEL":
+		return s.handleXDel(args)
+	case "XINFO":
+		return s.handleXInfo(args)
+	case "XGROUP":
+		return s.handleXGroup(args)
+	
 	default:
 		return protocol.EncodeError(fmt.Sprintf("unknown command '%s'", command))
 	}

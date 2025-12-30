@@ -369,6 +369,11 @@ func (aof *AOF) ShouldLogCommand(command string) bool {
 		"JSON.ARRPOP":    true,
 		"JSON.ARRINSERT": true,
 		"JSON.ARRTRIM":   true,
+		// Stream commands
+		"XADD":   true,
+		"XTRIM":  true,
+		"XDEL":   true,
+		"XGROUP": true,
 	}
 	
 	return writeCommands[strings.ToUpper(command)]

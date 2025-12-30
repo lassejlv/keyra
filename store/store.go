@@ -16,6 +16,7 @@ const (
 	SetType
 	ZSetType
 	JSONType
+	StreamType
 )
 
 func (dt DataType) String() string {
@@ -32,6 +33,8 @@ func (dt DataType) String() string {
 		return "zset"
 	case JSONType:
 		return "ReJSON-RL"
+	case StreamType:
+		return "stream"
 	default:
 		return "none"
 	}
@@ -69,6 +72,62 @@ func ZSetValue(zs *ZSet) *RedisValue {
 
 func JSONValue(j interface{}) *RedisValue {
 	return &RedisValue{Type: JSONType, Value: j}
+}
+
+func StreamValueFromStream(s *Stream) *RedisValue {
+	return &RedisValue{Type: StreamType, Value: s}
+}
+
+// Stream represents a Redis Stream
+type Stream struct {
+	Entries      []StreamEntry
+	LastID       string
+	Groups       map[string]*ConsumerGroup
+	MaxLen       int64 // 0 means unlimited
+	FirstID      string
+}
+
+// StreamEntry represents a single entry in a stream
+type StreamEntry struct {
+	ID     string
+	Fields map[string]string
+}
+
+// ConsumerGroup represents a consumer group
+type ConsumerGroup struct {
+	Name            string
+	LastDeliveredID string
+	Pending         map[string]*PendingEntry // entry ID -> pending info
+	Consumers       map[string]*Consumer
+}
+
+// Consumer represents a consumer in a group
+type Consumer struct {
+	Name        string
+	Pending     int64
+	LastSeenTime time.Time
+}
+
+// PendingEntry represents a pending entry
+type PendingEntry struct {
+	EntryID       string
+	ConsumerName  string
+	DeliveryTime  time.Time
+	DeliveryCount int64
+}
+
+func NewStream() *Stream {
+	return &Stream{
+		Entries: make([]StreamEntry, 0),
+		Groups:  make(map[string]*ConsumerGroup),
+	}
+}
+
+func (rv *RedisValue) Stream() *Stream {
+	if rv.Type != StreamType {
+		panic("value is not a stream")
+	}
+	return rv.Value.(*Stream)
 }
 
 func (rv *RedisValue) String() string {
@@ -442,6 +501,23 @@ func (s *Store) Save() error {
 				if err == nil {
 					sv.JSONValue = jsonBytes
 				}
+			case StreamType:
+				// Serialize stream
+				stream := v.Stream()
+				sv.StreamValue = &persistence.StreamData{
+					Entries: make([]persistence.StreamEntry, len(stream.Entries)),
+					LastID:  stream.LastID,
+					FirstID: stream.FirstID,
+				}
+				for i, e := range stream.Entries {
+					sv.StreamValue.Entries[i] = persistence.StreamEntry{
+						ID:     e.ID,
+						Fields: make(map[string]string),
+					}
+					for fk, fv := range e.Fields {
+						sv.StreamValue.Entries[i].Fields[fk] = fv
+					}
+				}
 			}
 			
 			databases[dbIdx].Data[k] = sv
@@ -518,6 +594,25 @@ func (s *Store) Load() error {
 					if err := json.Unmarshal(sv.JSONValue, &jsonData); err == nil {
 						db.data[k] = JSONValue(jsonData)
 					}
+				}
+			case persistence.StreamType:
+				if sv.StreamValue != nil {
+					stream := &Stream{
+						Entries: make([]StreamEntry, len(sv.StreamValue.Entries)),
+						LastID:  sv.StreamValue.LastID,
+						FirstID: sv.StreamValue.FirstID,
+						Groups:  make(map[string]*ConsumerGroup),
+					}
+					for i, e := range sv.StreamValue.Entries {
+						stream.Entries[i] = StreamEntry{
+							ID:     e.ID,
+							Fields: make(map[string]string),
+						}
+						for fk, fv := range e.Fields {
+							stream.Entries[i].Fields[fk] = fv
+						}
+					}
+					db.data[k] = StreamValueFromStream(stream)
 				}
 			}
 		}
